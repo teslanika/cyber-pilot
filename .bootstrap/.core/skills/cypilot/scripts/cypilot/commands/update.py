@@ -55,6 +55,10 @@ def cmd_update(argv: List[str]) -> int:
     )
     p.add_argument("--project-root", default=None, help="Project root directory")
     p.add_argument("--dry-run", action="store_true", help="Show what would be done")
+    p.add_argument("--no-interactive", action="store_true",
+                   help="Disable interactive prompts (auto-skip customized markers)")
+    p.add_argument("-y", "--yes", action="store_true",
+                   help="Auto-approve all prompts (no interaction)")
     args = p.parse_args(argv)
     # @cpt-end:cpt-cypilot-flow-version-config-update:p1:inst-user-update
 
@@ -139,7 +143,10 @@ def cmd_update(argv: List[str]) -> int:
 
             try:
                 kit_r = update_kit(
-                    kit_slug, kit_src, cypilot_dir, dry_run=args.dry_run,
+                    kit_slug, kit_src, cypilot_dir,
+                    dry_run=args.dry_run,
+                    interactive=not args.no_interactive,
+                    auto_approve=args.yes,
                 )
             except Exception as exc:
                 kit_r = {

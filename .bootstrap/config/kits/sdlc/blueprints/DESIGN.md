@@ -20,8 +20,6 @@ Based on: ISO/IEC/IEEE 42010:2022, IEEE 1016-2009
 
 `@cpt:blueprint`
 ```toml
-# Kit slug this blueprint belongs to
-kit = "sdlc"
 # Artifact kind: PRD | ADR | DESIGN | DECOMPOSITION | FEATURE | CODE
 artifact = "DESIGN"
 codebase = false

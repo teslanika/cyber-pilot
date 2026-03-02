@@ -20,8 +20,6 @@ dependencies, and traceability to PRD/DESIGN.
 
 `@cpt:blueprint`
 ```toml
-# Kit slug this blueprint belongs to
-kit = "sdlc"
 # Artifact kind: PRD | ADR | DESIGN | DECOMPOSITION | FEATURE | CODE
 artifact = "DECOMPOSITION"
 codebase = false

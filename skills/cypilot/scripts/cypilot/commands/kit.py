@@ -965,10 +965,57 @@ def _normalize_legacy_to_named(text: str, reference_text: str = "") -> str:
     return "".join(result_parts)
 
 
+def _prompt_confirm(message: str, state: Dict[str, bool]) -> str:
+    """Interactive prompt returning 'y' or 'n'.
+
+    state['all'] tracks whether user already chose 'all' (auto-approve).
+    Prompts go to stderr, input from stdin.
+    """
+    if state.get("all"):
+        return "y"
+    sys.stderr.write(f"{message} [y/N/all] ")
+    sys.stderr.flush()
+    try:
+        response = input().strip().lower()
+    except EOFError:
+        return "n"
+    if response == "all":
+        state["all"] = True
+        return "y"
+    return "y" if response == "y" else "n"
+
+
+def _show_marker_diff(key: str, user_raw: str, new_raw: str) -> None:
+    """Show compact unified diff between user and reference marker content."""
+    import difflib
+    user_lines = user_raw.splitlines(keepends=True)
+    new_lines = new_raw.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(
+        user_lines, new_lines,
+        fromfile=f"yours ({key})",
+        tofile=f"reference ({key})",
+        lineterm="",
+    ))
+    if not diff:
+        return
+    for line in diff:
+        line_s = line.rstrip("\n")
+        if line_s.startswith("+++") or line_s.startswith("---"):
+            sys.stderr.write(f"        {line_s}\n")
+        elif line_s.startswith("+"):
+            sys.stderr.write(f"        \033[32m{line_s}\033[0m\n")
+        elif line_s.startswith("-"):
+            sys.stderr.write(f"        \033[31m{line_s}\033[0m\n")
+        elif line_s.startswith("@@"):
+            sys.stderr.write(f"        \033[36m{line_s}\033[0m\n")
+
+
 def _three_way_merge_blueprint(
     old_ref_text: str,
     new_ref_text: str,
     user_text: str,
+    *,
+    force_keys: frozenset = frozenset(),
 ) -> tuple:
     """Three-way merge of a blueprint at the @cpt: marker level.
 
@@ -976,11 +1023,13 @@ def _three_way_merge_blueprint(
         old_ref_text: Previous reference version (before update).
         new_ref_text: New reference version (after update).
         user_text: User's current config copy.
+        force_keys: Set of marker keys to force-update even if user customized.
 
     Returns:
         (merged_text, report) where report is a dict with:
         - updated: list of marker keys that were updated
         - skipped: list of marker keys skipped (user customized)
+        - forced: list of marker keys force-updated (user customized but overwritten)
         - kept: list of marker keys kept as-is (no change in reference)
         - inserted: list of marker keys inserted (new in reference)
         - upgraded: list of marker keys upgraded from legacy to named syntax
@@ -1011,7 +1060,9 @@ def _three_way_merge_blueprint(
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-apply-merge
     updated: List[str] = []
+    updated_details: Dict[str, tuple] = {}  # key → (old_raw, new_raw)
     skipped: List[str] = []
+    skipped_details: Dict[str, tuple] = {}  # key → (user_raw, new_raw)
     kept: List[str] = []
     # Each element: (raw_text, marker_key or None)
     merged_parts: List[tuple] = []
@@ -1043,6 +1094,7 @@ def _three_way_merge_blueprint(
             if new_raw != old_raw:
                 merged_parts.append((new_raw, key))
                 updated.append(key)
+                updated_details[key] = (old_raw, new_raw)
             # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-unchanged
             else:
                 merged_parts.append((seg.raw, key))
@@ -1051,9 +1103,15 @@ def _three_way_merge_blueprint(
         # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-update-unmodified
         else:
             # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-preserve-user
-            # User customized this marker — skip update
-            merged_parts.append((seg.raw, key))
-            skipped.append(key)
+            # User customized this marker
+            if key in force_keys and new_raw is not None:
+                merged_parts.append((new_raw, key))
+                updated.append(key)
+                updated_details[key] = (seg.raw, new_raw)
+            else:
+                merged_parts.append((seg.raw, key))
+                skipped.append(key)
+                skipped_details[key] = (seg.raw, new_raw)
             # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-preserve-user
     # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-apply-merge
 
@@ -1121,7 +1179,8 @@ def _three_way_merge_blueprint(
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-return-merge
     merged_text = "".join(part[0] for part in merged_parts)
     report = {
-        "updated": updated, "skipped": skipped,
+        "updated": updated, "updated_details": updated_details,
+        "skipped": skipped, "skipped_details": skipped_details,
         "kept": kept, "inserted": inserted,
         "upgraded": upgraded,
     }
@@ -1171,6 +1230,8 @@ def update_kit(
     cypilot_dir: Path,
     *,
     dry_run: bool = False,
+    interactive: bool = True,
+    auto_approve: bool = False,
 ) -> Dict[str, Any]:
     """Full update cycle for a single kit.
 
@@ -1179,6 +1240,8 @@ def update_kit(
         source_dir: New kit data (e.g. cache/kits/{slug}/ or local dir).
         cypilot_dir: Project adapter directory.
         dry_run: If True, don't write files.
+        interactive: If True, prompt user for confirmation before writing.
+        auto_approve: If True, skip all prompts (equivalent to 'all').
 
     Steps:
         1. Save .prev/ snapshot of current reference
@@ -1249,6 +1312,7 @@ def update_kit(
         # Check version drift and auto-migrate
         mig_result = migrate_kit(
             kit_slug, ref_dir, config_kit_dir,
+            interactive=interactive, auto_approve=auto_approve,
         )
         result["version"] = mig_result
 
@@ -1296,14 +1360,20 @@ def migrate_kit(
     config_kit_dir: Path,
     *,
     dry_run: bool = False,
+    interactive: bool = True,
+    auto_approve: bool = False,
 ) -> Dict[str, Any]:
     """Migrate a single kit's config blueprints using marker-level three-way merge.
 
     Triggered by kit-level version drift (ref version > user version).
     When triggered, merges ALL blueprint .md files from reference into user config:
     - Unchanged markers → updated from new reference
-    - Customized markers → skipped (preserved)
+    - Customized markers → skipped (preserved) unless force-overwritten
     - Deleted markers → NOT re-added
+
+    When interactive=True, prompts user for confirmation before writing each file.
+    Customized markers get a separate warning prompt.
+    auto_approve=True skips all prompts (equivalent to answering 'all').
 
     Also updates config conf.toml.
 
@@ -1336,6 +1406,8 @@ def migrate_kit(
 
     # Merge ALL blueprint .md files from reference
     bp_results: List[Dict[str, Any]] = []
+    apply_state: Dict[str, bool] = {"all": auto_approve}
+    force_state: Dict[str, bool] = {"all": auto_approve}
 
     if ref_bp_dir.is_dir():
         for ref_file in sorted(ref_bp_dir.glob("*.md")):
@@ -1360,15 +1432,14 @@ def migrate_kit(
 
             if old_ref_file.is_file():
                 old_ref_text = old_ref_file.read_text(encoding="utf-8")
-                merged_text, report = _three_way_merge_blueprint(
-                    old_ref_text, new_ref_text, user_text,
-                )
             else:
                 # No .prev/ — conservative: treat new_ref as old_ref so all
                 # user diffs are seen as "customized" and preserved.
-                merged_text, report = _three_way_merge_blueprint(
-                    new_ref_text, new_ref_text, user_text,
-                )
+                old_ref_text = new_ref_text
+
+            merged_text, report = _three_way_merge_blueprint(
+                old_ref_text, new_ref_text, user_text,
+            )
 
             bp_report: Dict[str, Any] = {"blueprint": bp_name}
             if report["updated"]:
@@ -1379,17 +1450,67 @@ def migrate_kit(
                 bp_report["markers_inserted"] = report["inserted"]
 
             text_changed = merged_text != user_text
-            if report["updated"] or report.get("inserted") or text_changed:
+            has_changes = report["updated"] or report.get("inserted") or text_changed
+
+            if has_changes:
+                # ── Interactive: ask to apply normal changes ──────────
+                if interactive and not dry_run:
+                    upd_details = report.get("updated_details", {})
+                    skip_details = report.get("skipped_details", {})
+                    sys.stderr.write(f"\n  [{kit_slug}] {bp_name}:\n")
+                    if text_changed and not report["updated"] and not report.get("inserted"):
+                        sys.stderr.write("    syntax upgrade (legacy → named markers)\n")
+                    for k in report["updated"]:
+                        sys.stderr.write(f"    ✎ {k} — updated from reference\n")
+                        if k in upd_details:
+                            _show_marker_diff(k, *upd_details[k])
+                    for k in report.get("inserted", []):
+                        sys.stderr.write(f"    + {k} — new marker\n")
+                    for k in report["skipped"]:
+                        sys.stderr.write(f"    ≡ {k} — customized (kept)\n")
+                        if k in skip_details:
+                            _show_marker_diff(k, *skip_details[k])
+                    answer = _prompt_confirm("  Apply?", apply_state)
+                    if answer == "n":
+                        bp_report["action"] = "declined"
+                        bp_results.append(bp_report)
+                        continue
+
                 bp_report["action"] = "merged"
                 if text_changed and not report["updated"] and not report.get("inserted"):
                     bp_report["markers_upgraded"] = True
                 if not dry_run:
                     user_bp_dir.mkdir(parents=True, exist_ok=True)
                     user_file.write_text(merged_text, encoding="utf-8")
+
             elif report["skipped"]:
                 bp_report["action"] = "skipped_all_customized"
             else:
                 bp_report["action"] = "no_marker_changes"
+
+            # ── Interactive: offer to force-overwrite customized markers ──
+            if interactive and not dry_run and report["skipped"]:
+                sys.stderr.write(
+                    f"  ⚠ Overwrite {len(report['skipped'])} customized"
+                    f" marker(s)? ({', '.join(report['skipped'])})\n"
+                )
+                answer = _prompt_confirm(
+                    "  Overwrite with reference version?", force_state,
+                )
+                if answer == "y":
+                    forced_text, forced_report = _three_way_merge_blueprint(
+                        old_ref_text, new_ref_text, user_text,
+                        force_keys=frozenset(report["skipped"]),
+                    )
+                    if not dry_run:
+                        user_bp_dir.mkdir(parents=True, exist_ok=True)
+                        user_file.write_text(forced_text, encoding="utf-8")
+                    bp_report["action"] = "merged"
+                    bp_report["markers_forced"] = report["skipped"]
+                    if forced_report["skipped"]:
+                        bp_report["markers_skipped"] = forced_report["skipped"]
+                    else:
+                        bp_report.pop("markers_skipped", None)
 
             bp_results.append(bp_report)
 
@@ -1436,6 +1557,10 @@ def cmd_kit_migrate(argv: List[str]) -> int:
     )
     p.add_argument("--kit", default=None, help="Kit slug to migrate (default: all)")
     p.add_argument("--dry-run", action="store_true", help="Show what would be done")
+    p.add_argument("--no-interactive", action="store_true",
+                   help="Disable interactive prompts (auto-skip customized markers)")
+    p.add_argument("-y", "--yes", action="store_true",
+                   help="Auto-approve all prompts (no interaction)")
     args = p.parse_args(argv)
     # @cpt-end:cpt-cypilot-flow-blueprint-system-kit-migrate:p1:inst-user-migrate
 
@@ -1479,6 +1604,8 @@ def cmd_kit_migrate(argv: List[str]) -> int:
         result = migrate_kit(
             kit_slug, kit_dir, config_kit_dir,
             dry_run=args.dry_run,
+            interactive=not args.no_interactive,
+            auto_approve=args.yes,
         )
         # Regenerate .gen/ after successful migration
         if result["status"] == "migrated" and not args.dry_run:

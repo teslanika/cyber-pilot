@@ -822,7 +822,7 @@ class TestMigrateKit(unittest.TestCase):
         from cypilot.commands.kit import migrate_kit
         with TemporaryDirectory() as td:
             _, _, ref_dir, config_kit, _ = self._setup_kit(Path(td))
-            result = migrate_kit("sdlc", ref_dir, config_kit)
+            result = migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             self.assertEqual(result["status"], "migrated")
             bp = result["blueprints"][0]
             self.assertEqual(bp["action"], "merged")
@@ -837,7 +837,7 @@ class TestMigrateKit(unittest.TestCase):
             _, _, ref_dir, config_kit, _ = self._setup_kit(
                 Path(td), user_heading="My Custom Heading",
             )
-            result = migrate_kit("sdlc", ref_dir, config_kit)
+            result = migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             bp = result["blueprints"][0]
             # blueprint marker is unchanged → updated; heading is customized → skipped
             self.assertTrue(any("heading" in k for k in bp.get("markers_skipped", [])))
@@ -850,7 +850,7 @@ class TestMigrateKit(unittest.TestCase):
             _, _, ref_dir, config_kit, _ = self._setup_kit(
                 Path(td), ref_ver=1, user_ver=1,
             )
-            result = migrate_kit("sdlc", ref_dir, config_kit)
+            result = migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             self.assertEqual(result["status"], "current")
 
     def test_updates_conf_toml(self):
@@ -858,7 +858,7 @@ class TestMigrateKit(unittest.TestCase):
         import tomllib
         with TemporaryDirectory() as td:
             _, _, ref_dir, config_kit, _ = self._setup_kit(Path(td))
-            migrate_kit("sdlc", ref_dir, config_kit)
+            migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             with open(config_kit / "conf.toml", "rb") as f:
                 data = tomllib.load(f)
             self.assertEqual(data["version"], 2)
@@ -880,7 +880,7 @@ class TestMigrateKit(unittest.TestCase):
                 Path(td), with_prev=False,
                 user_heading="My Custom Heading",
             )
-            result = migrate_kit("sdlc", ref_dir, config_kit)
+            result = migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             self.assertEqual(result["status"], "migrated")
             # User customization MUST survive
             user_text = (config_kit / "blueprints" / "FEAT.md").read_text()
@@ -897,7 +897,7 @@ class TestMigrateKit(unittest.TestCase):
             from cypilot.utils import toml_utils
             toml_utils.dump({"version": 3}, ref_dir / "conf.toml")
             toml_utils.dump({"version": 2}, config_kit / "conf.toml")
-            result = migrate_kit("sdlc", ref_dir, config_kit)
+            result = migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             self.assertEqual(result["status"], "migrated")
             self.assertIn("kit_version", result)
 
@@ -905,7 +905,7 @@ class TestMigrateKit(unittest.TestCase):
         from cypilot.commands.kit import migrate_kit
         with TemporaryDirectory() as td:
             _, _, ref_dir, config_kit, _ = self._setup_kit(Path(td))
-            migrate_kit("sdlc", ref_dir, config_kit)
+            migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             self.assertFalse((ref_dir / ".prev").exists())
 
     def test_missing_ref_blueprint_file(self):
@@ -922,7 +922,7 @@ class TestMigrateKit(unittest.TestCase):
             config_kit = adapter / "config" / "kits" / "sdlc"
             config_kit.mkdir(parents=True)
             toml_utils.dump({"version": 1}, config_kit / "conf.toml")
-            result = migrate_kit("sdlc", ref_dir, config_kit)
+            result = migrate_kit("sdlc", ref_dir, config_kit, interactive=False)
             # No .md files in ref blueprints dir → no blueprints migrated
             self.assertEqual(result["status"], "migrated")
             self.assertNotIn("blueprints", result)
@@ -1507,6 +1507,183 @@ class TestLegacyToNamedTransition(unittest.TestCase):
         self.assertIn("My custom text", merged)
         self.assertNotIn("Updated", merged)
         self.assertEqual(len(report["skipped"]), 1)
+
+
+# =========================================================================
+# Force-update customized markers
+# =========================================================================
+
+class TestForceKeys(unittest.TestCase):
+    """force_keys parameter lets merge overwrite user-customized markers."""
+
+    def test_force_overwrites_customized(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old = '`@cpt:heading:title`\n```toml\nid = "title"\nlevel = 1\n```\nOriginal\n`@/cpt:heading:title`\n'
+        new = '`@cpt:heading:title`\n```toml\nid = "title"\nlevel = 1\n```\nUpdated\n`@/cpt:heading:title`\n'
+        user = '`@cpt:heading:title`\n```toml\nid = "title"\nlevel = 1\n```\nMy edit\n`@/cpt:heading:title`\n'
+        # Without force: user edit preserved
+        merged, report = _three_way_merge_blueprint(old, new, user)
+        self.assertIn("My edit", merged)
+        self.assertEqual(report["skipped"], ["heading:title"])
+        # With force: reference overwrites
+        merged2, report2 = _three_way_merge_blueprint(
+            old, new, user, force_keys=frozenset(["heading:title"]),
+        )
+        self.assertIn("Updated", merged2)
+        self.assertNotIn("My edit", merged2)
+        self.assertEqual(report2["skipped"], [])
+        self.assertIn("heading:title", report2["updated"])
+
+    def test_force_no_effect_on_unmodified(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old = '`@cpt:rule:req-s`\n```toml\nkind = "req"\nsection = "s"\n```\nA\n`@/cpt:rule:req-s`\n'
+        new = '`@cpt:rule:req-s`\n```toml\nkind = "req"\nsection = "s"\n```\nA v2\n`@/cpt:rule:req-s`\n'
+        user = old  # user didn't change
+        merged, report = _three_way_merge_blueprint(
+            old, new, user, force_keys=frozenset(["rule:req-s"]),
+        )
+        self.assertIn("A v2", merged)
+        self.assertIn("rule:req-s", report["updated"])
+        self.assertEqual(report["skipped"], [])
+
+
+# =========================================================================
+# Interactive prompt helper
+# =========================================================================
+
+class TestPromptConfirm(unittest.TestCase):
+    """_prompt_confirm returns correct answers based on input."""
+
+    def test_yes(self):
+        from cypilot.commands.kit import _prompt_confirm
+        from unittest.mock import patch
+        state: dict = {}
+        with patch("builtins.input", return_value="y"):
+            self.assertEqual(_prompt_confirm("Apply?", state), "y")
+        self.assertFalse(state.get("all", False))
+
+    def test_no(self):
+        from cypilot.commands.kit import _prompt_confirm
+        from unittest.mock import patch
+        state: dict = {}
+        with patch("builtins.input", return_value="n"):
+            self.assertEqual(_prompt_confirm("Apply?", state), "n")
+
+    def test_default_is_no(self):
+        from cypilot.commands.kit import _prompt_confirm
+        from unittest.mock import patch
+        state: dict = {}
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(_prompt_confirm("Apply?", state), "n")
+
+    def test_all_sets_state(self):
+        from cypilot.commands.kit import _prompt_confirm
+        from unittest.mock import patch
+        state: dict = {}
+        with patch("builtins.input", return_value="all"):
+            self.assertEqual(_prompt_confirm("Apply?", state), "y")
+        self.assertTrue(state["all"])
+
+    def test_all_state_skips_prompt(self):
+        from cypilot.commands.kit import _prompt_confirm
+        state = {"all": True}
+        # Should return 'y' without calling input()
+        self.assertEqual(_prompt_confirm("Apply?", state), "y")
+
+    def test_eof_returns_no(self):
+        from cypilot.commands.kit import _prompt_confirm
+        from unittest.mock import patch
+        state: dict = {}
+        with patch("builtins.input", side_effect=EOFError):
+            self.assertEqual(_prompt_confirm("Apply?", state), "n")
+
+
+# =========================================================================
+# Reference-guided normalization
+# =========================================================================
+
+class TestShowMarkerDiff(unittest.TestCase):
+    """_show_marker_diff outputs unified diff to stderr."""
+
+    def test_diff_output(self):
+        from cypilot.commands.kit import _show_marker_diff
+        import io
+        from unittest.mock import patch
+        buf = io.StringIO()
+        with patch("sys.stderr", buf):
+            _show_marker_diff(
+                "heading:title",
+                '`@cpt:heading:title`\nOld content\n`@/cpt:heading:title`\n',
+                '`@cpt:heading:title`\nNew content\n`@/cpt:heading:title`\n',
+            )
+        output = buf.getvalue()
+        self.assertIn("Old content", output)
+        self.assertIn("New content", output)
+        self.assertIn("yours (heading:title)", output)
+        self.assertIn("reference (heading:title)", output)
+
+    def test_no_diff_when_identical(self):
+        from cypilot.commands.kit import _show_marker_diff
+        import io
+        from unittest.mock import patch
+        buf = io.StringIO()
+        with patch("sys.stderr", buf):
+            _show_marker_diff("k", "same\n", "same\n")
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_skipped_details_in_report(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old = '`@cpt:heading:t`\n```toml\nid = "t"\n```\nOrig\n`@/cpt:heading:t`\n'
+        new = '`@cpt:heading:t`\n```toml\nid = "t"\n```\nUpdated\n`@/cpt:heading:t`\n'
+        user = '`@cpt:heading:t`\n```toml\nid = "t"\n```\nMy edit\n`@/cpt:heading:t`\n'
+        _, report = _three_way_merge_blueprint(old, new, user)
+        self.assertIn("heading:t", report["skipped_details"])
+        user_raw, new_raw = report["skipped_details"]["heading:t"]
+        self.assertIn("My edit", user_raw)
+        self.assertIn("Updated", new_raw)
+
+
+class TestReferenceGuidedNormalization(unittest.TestCase):
+    """_normalize_legacy_to_named with reference handles all marker types."""
+
+    def test_heading_without_toml_id(self):
+        """Heading with no 'id' in TOML — reference-guided normalization assigns ID."""
+        from cypilot.commands.kit import _normalize_legacy_to_named
+        legacy = '`@cpt:heading`\n```toml\nlevel = 1\ntemplate = "Title"\n```\n`@/cpt:heading`\n'
+        ref = '`@cpt:heading:my-title`\n```toml\nlevel = 1\ntemplate = "Title"\n```\n`@/cpt:heading:my-title`\n'
+        result = _normalize_legacy_to_named(legacy, ref)
+        self.assertIn("`@cpt:heading:my-title`", result)
+        self.assertIn("`@/cpt:heading:my-title`", result)
+
+    def test_prompt_without_toml(self):
+        """Prompt marker with no TOML — gets ID from reference positionally."""
+        from cypilot.commands.kit import _normalize_legacy_to_named
+        legacy = '`@cpt:prompt`\nSome text\n`@/cpt:prompt`\n'
+        ref = '`@cpt:prompt:overview`\nSome text\n`@/cpt:prompt:overview`\n'
+        result = _normalize_legacy_to_named(legacy, ref)
+        self.assertIn("`@cpt:prompt:overview`", result)
+        self.assertIn("`@/cpt:prompt:overview`", result)
+
+    def test_count_mismatch_skips_type(self):
+        """When marker counts differ, normalization skips that type."""
+        from cypilot.commands.kit import _normalize_legacy_to_named
+        legacy = '`@cpt:rule`\n```toml\nkind = "a"\n```\nR1\n`@/cpt:rule`\n'
+        ref = (
+            '`@cpt:rule:a`\n```toml\nkind = "a"\n```\nR1\n`@/cpt:rule:a`\n'
+            '`@cpt:rule:b`\n```toml\nkind = "b"\n```\nR2\n`@/cpt:rule:b`\n'
+        )
+        result = _normalize_legacy_to_named(legacy, ref)
+        # Should NOT upgrade (counts differ: 1 vs 2)
+        self.assertIn("`@cpt:rule`", result)
+        self.assertNotIn("`@cpt:rule:a`", result)
+
+    def test_already_named_not_touched(self):
+        """Named markers in text are not double-upgraded."""
+        from cypilot.commands.kit import _normalize_legacy_to_named
+        text = '`@cpt:heading:title`\n```toml\nid = "title"\n```\nH\n`@/cpt:heading:title`\n'
+        ref = '`@cpt:heading:title`\n```toml\nid = "title"\n```\nH\n`@/cpt:heading:title`\n'
+        result = _normalize_legacy_to_named(text, ref)
+        self.assertEqual(result, text)
 
 
 if __name__ == "__main__":

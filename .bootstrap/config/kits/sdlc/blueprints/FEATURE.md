@@ -20,8 +20,6 @@ of done, and acceptance criteria.
 
 `@cpt:blueprint`
 ```toml
-# Kit slug this blueprint belongs to
-kit = "sdlc"
 # Artifact kind: PRD | ADR | DESIGN | DECOMPOSITION | FEATURE | CODE
 artifact = "FEATURE"
 codebase = false

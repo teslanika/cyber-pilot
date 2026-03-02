@@ -127,7 +127,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.stderr.write("Updating project...\n")
         # Forward only 'update' + any remaining flags (strip version positional arg)
         update_args = ["update"]
-        for flag in ("--dry-run", "--help", "-h"):
+        for flag in ("--dry-run", "--help", "-h", "--no-interactive", "-y", "--yes"):
             if flag in args:
                 update_args.append(flag)
         # @cpt-begin:cpt-cypilot-flow-core-infra-cli-invocation:p1:inst-return-cache-update

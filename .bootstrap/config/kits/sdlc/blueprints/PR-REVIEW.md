@@ -2,7 +2,7 @@
 
 `@cpt:blueprint`
 ```toml
-kit = "cypilot-sdlc"
+artifact = "PR-REVIEW"
 ```
 `@/cpt:blueprint`
 
