@@ -468,6 +468,7 @@ def cmd_validate(argv: List[str]) -> int:
         if strict_code_validation and parsed_code_files_full:
             # Collect CDSL instructions per ID from FULL-traceability artifacts
             artifact_instances: Dict[str, Set[str]] = {}
+            artifact_instances_all: Dict[str, Set[str]] = {}
             for art in all_artifacts_for_cross:
                 art_traceability = traceability_by_path.get(str(art.path), "FULL")
                 if art_traceability != "FULL":
@@ -477,8 +478,10 @@ def cmd_validate(argv: List[str]) -> int:
                         pid = str(step.get("parent_id") or "")
                         inst = str(step.get("inst") or "")
                         checked = bool(step.get("checked", False))
-                        if pid and inst and checked:
-                            artifact_instances.setdefault(pid, set()).add(inst)
+                        if pid and inst:
+                            artifact_instances_all.setdefault(pid, set()).add(inst)
+                            if checked:
+                                artifact_instances.setdefault(pid, set()).add(inst)
                 except Exception:
                     continue
 
@@ -489,6 +492,7 @@ def cmd_validate(argv: List[str]) -> int:
                 forbidden_code_ids=to_code_ids_task_unchecked,
                 traceability="FULL",
                 artifact_instances=artifact_instances,
+                artifact_instances_all=artifact_instances_all,
             )
             all_errors.extend(cv.get("errors", []))
             all_warnings.extend(cv.get("warnings", []))

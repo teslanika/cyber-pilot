@@ -190,6 +190,22 @@ def build_toc(
 # @cpt-end:cpt-cypilot-algo-traceability-validation-toc-utils:p1:inst-toc-util-build-toc
 
 
+def _next_heading_or_separator(
+    lines: List[str], start: int,
+) -> Optional[int]:
+    """Return index of next heading or ``---`` separator, skipping fenced blocks."""
+    in_fence = False
+    for j in range(start, len(lines)):
+        if _FENCE_RE.match(lines[j].strip()):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if re.match(r"^#{1,6}\s", lines[j]) or lines[j].strip() == "---":
+            return j
+    return None
+
+
 def _unique_slug(text: str, slug_counts: Dict[str, int]) -> str:
     """Return a unique GitHub-compatible slug, tracking duplicates."""
     slug = github_anchor(text)
@@ -304,16 +320,18 @@ def insert_toc_heading(
 
     # --- Try replacing an existing ToC section ---
     toc_start = toc_end = None
+    in_fence = False
     for i, line in enumerate(lines):
+        if _FENCE_RE.match(line.strip()):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         if re.match(r"^##\s+Table of Contents\s*$", line):
             toc_start = i
-            # End = next heading or --- separator
-            for j in range(i + 1, len(lines)):
-                if re.match(r"^#{1,6}\s", lines[j]) or lines[j].strip() == "---":
-                    toc_end = j
-                    break
-            else:
-                toc_end = len(lines)
+            # End = next heading or --- separator (fence-aware)
+            end = _next_heading_or_separator(lines, i + 1)
+            toc_end = end if end is not None else len(lines)
             break
 
     if toc_start is not None and toc_end is not None:
@@ -344,7 +362,13 @@ def insert_toc_heading(
             return f"{before}\n\n{toc_section}\n\n{after}"
 
     # No --- found: insert after first heading + metadata block
+    in_fence_fb = False
     for j in range(i, len(lines)):
+        if _FENCE_RE.match(lines[j].strip()):
+            in_fence_fb = not in_fence_fb
+            continue
+        if in_fence_fb:
+            continue
         if re.match(r"^#{1,6}\s", lines[j]):
             k = j + 1
             while k < len(lines):
@@ -398,13 +422,9 @@ def _strip_manual_toc(content: str) -> Tuple[str, bool]:
 
         if re.match(r"^##\s+Table of Contents\s*$", line):
             toc_heading_start = i
-            # Find end: next heading or --- separator
-            for j in range(i + 1, len(lines)):
-                if re.match(r"^#{1,6}\s", lines[j]) or lines[j].strip() == "---":
-                    toc_heading_end = j
-                    break
-            else:
-                toc_heading_end = len(lines)
+            # Find end: next heading or --- separator (fence-aware)
+            end = _next_heading_or_separator(lines, i + 1)
+            toc_heading_end = end if end is not None else len(lines)
             break
 
     if toc_heading_start is None:
@@ -490,13 +510,17 @@ def _find_toc_section(
     Line indices are 0-based and inclusive/exclusive (``lines[start:end]``).
     """
     # Try heading-based first
+    in_fence = False
     for i, line in enumerate(lines):
+        if _FENCE_RE.match(line.strip()):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         if re.match(r"^##\s+Table of Contents\s*$", line):
-            # Find end: next heading or --- separator
-            for j in range(i + 1, len(lines)):
-                if re.match(r"^#{1,6}\s", lines[j]) or lines[j].strip() == "---":
-                    return (i, j, "heading")
-            return (i, len(lines), "heading")
+            # Find end: next heading or --- separator (fence-aware)
+            end = _next_heading_or_separator(lines, i + 1)
+            return (i, end if end is not None else len(lines), "heading")
 
     # Try marker-based
     start_idx = None
@@ -676,7 +700,13 @@ def validate_toc(
 
 def _find_heading_line(lines: List[str], heading_text: str) -> int:
     """Find the 1-based line number of a heading by its text."""
+    in_fence = False
     for i, line in enumerate(lines):
+        if _FENCE_RE.match(line.strip()):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         m = _HEADING_RE.match(line)
         if m and m.group(2).strip() == heading_text:
             return i + 1

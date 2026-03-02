@@ -11,50 +11,54 @@ drivers:
 
 # Blueprint Specification
 
+
+<!-- toc -->
+
+- [Overview](#overview)
+- [Blueprint File Structure](#blueprint-file-structure)
+- [Marker Syntax](#marker-syntax)
+  - [General Rules](#general-rules)
+  - [Content Blocks](#content-blocks)
+  - [Marker Summary](#marker-summary)
+  - [Kit-Registered Markers (p2)](#kit-registered-markers-p2)
+- [Marker Reference](#marker-reference)
+  - [cpt:blueprint](#cptblueprint)
+  - [cpt:skill](#cptskill)
+  - [PRD Commands](#prd-commands)
+  - [PRD Workflows](#prd-workflows)
+  - [cpt:system-prompt](#cptsystem-prompt)
+  - [cpt:workflow](#cptworkflow)
+- [Prerequisites](#prerequisites)
+- [Steps](#steps)
+  - [cpt:rules](#cptrules)
+  - [cpt:rule](#cptrule)
+  - [cpt:checklist](#cptchecklist)
+  - [cpt:check](#cptcheck)
+  - [cpt:heading](#cptheading)
+  - [cpt:id](#cptid)
+  - [cpt:prompt](#cptprompt)
+  - [cpt:example](#cptexample)
+- [Placeholder Syntax](#placeholder-syntax)
+  - [Placeholder Format](#placeholder-format)
+  - [Pattern Validation](#pattern-validation)
+  - [Example Derivation](#example-derivation)
+  - [Template Derivation](#template-derivation)
+- [Generated Outputs Summary](#generated-outputs-summary)
+- [Parsing Algorithm](#parsing-algorithm)
+- [Update Model](#update-model)
+  - [Reference Principle](#reference-principle)
+  - [Initial Installation](#initial-installation)
+  - [Update Modes](#update-modes)
+    - [Force Update](#force-update)
+    - [Additive Update (default)](#additive-update-default)
+  - [Conflict Resolution](#conflict-resolution)
+- [Blueprint Examples](#blueprint-examples)
+- [Error Handling](#error-handling)
+- [Blueprint Validation Rules](#blueprint-validation-rules)
+
+<!-- /toc -->
+
 ---
-
-## Table of Contents
-
-- [Blueprint Specification](#blueprint-specification)
-  - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Blueprint File Structure](#blueprint-file-structure)
-  - [Marker Syntax](#marker-syntax)
-    - [General Rules](#general-rules)
-    - [Content Blocks](#content-blocks)
-    - [Marker Summary](#marker-summary)
-    - [Kit-Registered Markers (p2)](#kit-registered-markers-p2)
-  - [Marker Reference](#marker-reference)
-    - [cpt:blueprint](#cptblueprint)
-    - [cpt:skill](#cptskill)
-    - [cpt:system-prompt](#cptsystem-prompt)
-    - [cpt:workflow](#cptworkflow)
-    - [cpt:rules](#cptrules)
-    - [cpt:rule](#cptrule)
-    - [cpt:checklist](#cptchecklist)
-    - [cpt:check](#cptcheck)
-    - [cpt:heading](#cptheading)
-    - [cpt:id](#cptid)
-    - [cpt:prompt](#cptprompt)
-    - [cpt:example](#cptexample)
-  - [Placeholder Syntax](#placeholder-syntax)
-    - [Placeholder Format](#placeholder-format)
-    - [Pattern Validation](#pattern-validation)
-    - [Example Derivation](#example-derivation)
-    - [Template Derivation](#template-derivation)
-  - [Generated Outputs Summary](#generated-outputs-summary)
-  - [Parsing Algorithm](#parsing-algorithm)
-  - [Update Model](#update-model)
-    - [Reference Principle](#reference-principle)
-    - [Initial Installation](#initial-installation)
-    - [Update Modes](#update-modes)
-      - [Force Update](#force-update)
-      - [Additive Update (default)](#additive-update-default)
-    - [Conflict Resolution](#conflict-resolution)
-  - [Blueprint Examples](#blueprint-examples)
-  - [Error Handling](#error-handling)
-  - [Blueprint Validation Rules](#blueprint-validation-rules)
-
 ---
 
 ## Overview
@@ -66,7 +70,7 @@ Blueprints with an `artifact` key in `@cpt:blueprint` define artifact kinds (e.g
 **Blueprint properties**:
 - One `<KIND>.md` file per artifact kind per kit
 - No YAML frontmatter — all metadata lives in `@cpt:` marker TOML blocks
-- `` `@cpt:type` `` / `` `@/cpt:type` `` backtick-delimited markers for all annotations
+- `` `@cpt:TYPE` `` / `` `@cpt:TYPE:ID` `` backtick-delimited markers for all annotations (named syntax with explicit ID required for new blueprints; legacy syntax without ID supported with positional fallback)
 - Each marker contains zero or more fenced code blocks (` ```toml ` for config, ` ```markdown ` for content)
 - Both humans and machines can read and edit the blueprint naturally
 
@@ -113,14 +117,17 @@ See [examples/blueprint-structure.md](examples/blueprint-structure.md) for a com
 
 ### General Rules
 
-1. **Opening tag**: `` `@cpt:type` `` — backtick-delimited, must be the entire line
-2. **Closing tag**: `` `@/cpt:type` `` — backtick-delimited, must be the entire line
-3. **Content** between tags consists of zero or more **fenced code blocks** (` ```toml `, ` ```markdown `). Fences may use 3 or more backticks (e.g., ```````` for content that itself contains ``` fences)
-4. **No inline attributes** — all configuration lives in fenced ` ```toml ` blocks
-5. **No bare content** inside `@cpt:` blocks outside fenced code blocks
-6. Markers MUST NOT be nested
-7. All markers are **visible** in rendered Markdown (rendered as inline code + fenced blocks)
-8. **Free text outside markers is ignored** — any content outside `@cpt:` blocks is not processed and can be used as comments, documentation, or human-readable descriptions of the blueprint. This allows blueprints to be self-documenting files.
+1. **Opening tag**: `` `@cpt:TYPE` `` or `` `@cpt:TYPE:ID` `` — backtick-delimited, must be the entire line
+2. **Closing tag**: `` `@/cpt:TYPE` `` or `` `@/cpt:TYPE:ID` `` — backtick-delimited, must be the entire line, TYPE (and ID if present) must match the opening tag
+3. **Named syntax** (required for new blueprints): `` `@cpt:TYPE:ID` `` where `ID` is a kebab-case slug unique within the blueprint for that marker type (e.g., `` `@cpt:rule:prereq-load-dependencies` ``). Provides stable identity for three-way merge
+4. **Legacy syntax** (backward-compatible): `` `@cpt:TYPE` `` without explicit ID. Supported with positional fallback during merge, but emits a deprecation warning
+5. **Singleton markers** (`blueprint`, `skill`, `system-prompt`, `rules`, `checklist`) use type as identity key and do not require an explicit ID
+6. **Content** between tags consists of zero or more **fenced code blocks** (` ```toml `, ` ```markdown `). Fences may use 3 or more backticks (e.g., ```````` for content that itself contains ``` fences)
+7. **No inline attributes** — all configuration lives in fenced ` ```toml ` blocks
+8. **No bare content** inside `@cpt:` blocks outside fenced code blocks
+9. Markers MUST NOT be nested
+10. All markers are **visible** in rendered Markdown (rendered as inline code + fenced blocks)
+11. **Free text outside markers is ignored** — any content outside `@cpt:` blocks is not processed and can be used as comments, documentation, or human-readable descriptions of the blueprint. This allows blueprints to be self-documenting files.
 
 ### Content Blocks
 
@@ -758,21 +765,29 @@ The Blueprint Processor parses all markers and invokes output generators. All ou
 ## Parsing Algorithm
 
 1. Read the blueprint file as UTF-8 text.
-2. Scan for lines matching `` `@cpt:TYPE` `` (opening) or `` `@/cpt:TYPE` `` (closing).
+2. Scan for lines matching `` `@cpt:TYPE` `` or `` `@cpt:TYPE:ID` `` (opening) and `` `@/cpt:TYPE` `` or `` `@/cpt:TYPE:ID` `` (closing).
 3. For each opening tag:
-   a. Extract the marker type (word after `@cpt:`).
-   b. Collect all fenced code blocks between the opening and closing tags.
-   c. Parse ` ```toml ` blocks as TOML configuration.
-   d. Collect ` ```markdown ` blocks as content.
-4. Validate:
+   a. Extract the marker type and optional explicit ID from the tag (e.g., `rule` and `prereq-load-dependencies` from `` `@cpt:rule:prereq-load-dependencies` ``).
+   b. Find the matching closing tag (type and ID must match).
+   c. Collect all fenced code blocks between the opening and closing tags.
+   d. Parse ` ```toml ` blocks as TOML configuration.
+   e. Collect ` ```markdown ` blocks as content.
+   f. Derive **identity key** using the resolution chain:
+      1. **Explicit syntax ID** (highest priority): if marker uses named syntax `` `@cpt:TYPE:ID` ``, identity key = `TYPE:ID`
+      2. **TOML-derived key**: for markers with structured TOML content — `heading:{id}`, `id:{kind}`, `workflow:{name}`
+      3. **Positional index** (legacy fallback): for unnamed markers without TOML keys, append `#N` ordinal per base key (e.g., `rule#0`, `rule#1`)
+   g. **Singleton markers** (`blueprint`, `skill`, `system-prompt`, `rules`, `checklist`): identity key = marker type itself
+4. If any non-singleton marker lacks an explicit syntax ID, emit a deprecation warning (legacy positional fallback used).
+5. Validate:
    a. `@cpt:blueprint` must be present and be the first marker.
    b. Every opening tag must have a matching closing tag.
    c. No nested markers.
    d. All marker types must be registered (core or kit).
    e. TOML blocks must parse without errors.
    f. Required TOML keys must be present for each marker type.
-5. Group markers by type.
-6. Invoke output generators.
+   g. Named marker IDs must be unique within the blueprint for each marker type.
+6. Group markers by type.
+7. Invoke output generators.
 
 **Template extraction** (for template.md):
 1. Walk all `@cpt:heading` blocks in order.
@@ -817,29 +832,36 @@ Use when: starting fresh, after breaking edits, or when you want to fully sync w
 
 **Command**: `cypilot kit update`
 
-Three-way diff using the **current reference** in `{cypilot_path}/kits/{slug}/` as the base:
+Three-way merge using stable **identity keys** for marker matching across versions:
 
 ```
-{cypilot_path}/kits/{slug}/ (current)  ── the reference
-    ↕ diff A: detect user modifications
-config/kits/{slug}/blueprints/    ── user’s version
+{cypilot_path}/kits/{slug}/.prev/  ── old reference (saved before update)
+    ↕ identity-key match
+config/kits/{slug}/blueprints/     ── user's version
 
-{cypilot_path}/kits/{slug}/ (current)  ── the reference
-    ↕ diff B: detect kit upstream changes
-new kit version                   ── the updated upstream
+{cypilot_path}/kits/{slug}/        ── new reference (current kit version)
+    ↕ identity-key match
+{cypilot_path}/kits/{slug}/.prev/  ── old reference
 ```
 
-The reference is always available in `{cypilot_path}/kits/{slug}/`. After a successful merge, the reference is replaced with the new version.
+All three versions are parsed into segment lists with stable identity keys (see [Parsing Algorithm](#parsing-algorithm)). Markers are matched across versions by their identity key — named markers (`@cpt:TYPE:ID`) match by `TYPE:ID`; TOML-keyed markers match by derived key; legacy unnamed markers match by positional index fallback. After a successful merge, `.prev/` is cleaned up and the reference is replaced with the new version.
 
 **Merge rules**:
 
 | Condition | Action |
 |-----------|--------|
-| Section unchanged by user (current == previous source) | Update to new version |
-| Section modified by user (current ≠ previous source) | **Preserve** user version |
-| New marker in new version (not in previous source) | **Insert** into blueprint |
-| Marker deleted by user (in previous source, not in current) | **Respect** deletion — do not re-add |
-| Both user and kit modified same section | **Conflict** — flag for manual resolution |
+| Marker unchanged by user (user raw == old_ref raw) AND new differs | **Update** to new version |
+| Marker unchanged by user AND new unchanged | **Keep** as-is |
+| Marker modified by user (user raw ≠ old_ref raw) | **Preserve** user version (skip update) |
+| Marker deleted by user (in old_ref, absent from user) | **Respect** deletion — do not re-add, even if present in new |
+| User-added marker (not in old_ref) | **Keep** as-is |
+| Truly new marker (in new_ref, not in old_ref, not in user) | **Insert** at anchor-relative position |
+
+**Anchor-relative insertion** for new markers:
+
+1. For each new marker, find the nearest preceding known marker in the new reference (by identity key) as **anchor**.
+2. If the anchor exists in the merged output, insert the new marker after the anchor position.
+3. If the anchor is not found (all preceding markers deleted by user), search forward for the nearest following known marker and insert before it; default to append at end.
 
 ### Conflict Resolution
 
@@ -873,6 +895,9 @@ When conflicts are detected during additive update:
 | `BLUEPRINT_DUPLICATE_HEADING_ID` | Two `@cpt:heading` markers with same `id` | Use unique IDs |
 | `BLUEPRINT_DUPLICATE_CHECK_ID` | Two `@cpt:check` markers with same `id` | Use unique IDs |
 | `BLUEPRINT_DUPLICATE_WORKFLOW` | Two `@cpt:workflow` markers with same `name` across all blueprints | Use unique workflow names |
+| `BLUEPRINT_DUPLICATE_MARKER_ID` | Two markers of the same type with the same explicit ID in a blueprint | Use unique IDs per marker type |
+| `BLUEPRINT_TAG_MISMATCH` | Closing tag TYPE:ID does not match opening tag | Fix closing tag to match opening |
+| `BLUEPRINT_LEGACY_MARKER` | Non-singleton marker without explicit ID (deprecation warning) | Add explicit ID: `` `@cpt:rule:my-id` `` |
 | `BLUEPRINT_UPDATE_CONFLICT` | Both user and kit modified the same section during additive update | Resolve conflicts in `<KIND>.md.conflicts`, then run `cypilot generate-resources` |
 
 ---
@@ -882,16 +907,18 @@ When conflicts are detected during additive update:
 The Blueprint Processor validates blueprints before generation:
 
 1. **Structure**: `@cpt:blueprint` marker present and is the first marker.
-2. **Completeness**: every `` `@cpt:type` `` has a matching `` `@/cpt:type` ``.
+2. **Completeness**: every `` `@cpt:TYPE` `` or `` `@cpt:TYPE:ID` `` has a matching `` `@/cpt:TYPE` `` or `` `@/cpt:TYPE:ID` `` (type and ID must match).
 3. **No nesting**: no markers inside other markers.
 4. **Known markers**: all marker types are registered (core or kit).
 5. **TOML validity**: all ` ```toml ` blocks parse without errors.
 6. **Required keys**: required TOML keys present for each marker type (e.g., `id`, `level` for headings).
 7. **Boolean convention**: `task`, `priority`, `coverage`, `multiple` use `true`/`false` or are omitted (no string values).
 8. **Unique IDs**: heading IDs (`@cpt:heading.id`) and check IDs (`@cpt:check.id`) are unique within the blueprint.
-9. **Domain references**: `@cpt:check.domain` must match a `[[domain]].abbr` defined in `@cpt:checklist`.
-10. **Rule references**: `@cpt:rule.kind` and `@cpt:rule.section` must match entries in `@cpt:rules`.
-11. **Workflow uniqueness**: `@cpt:workflow.name` values are unique across all blueprints in all installed kits.
-12. **Version compatibility**: blueprint version is supported by the current processor.
+9. **Named marker IDs**: explicit IDs in `` `@cpt:TYPE:ID` `` syntax must be unique within the blueprint for each marker type.
+10. **Domain references**: `@cpt:check.domain` must match a `[[domain]].abbr` defined in `@cpt:checklist`.
+11. **Rule references**: `@cpt:rule.kind` and `@cpt:rule.section` must match entries in `@cpt:rules`.
+12. **Workflow uniqueness**: `@cpt:workflow.name` values are unique across all blueprints in all installed kits.
+13. **Version compatibility**: blueprint version is supported by the current processor.
+14. **Legacy marker warning**: non-singleton markers without explicit ID emit a deprecation warning (not a blocking error).
 
 Validation runs automatically before generation. Errors abort generation with actionable messages.

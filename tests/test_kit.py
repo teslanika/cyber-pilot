@@ -1094,5 +1094,317 @@ class TestCmdKitMigrate(unittest.TestCase):
                 os.chdir(cwd)
 
 
+# =========================================================================
+# Named marker syntax + identity key resolution
+# =========================================================================
+
+class TestNamedMarkerSyntax(unittest.TestCase):
+    """Tests for @cpt:TYPE:ID named marker syntax support."""
+
+    def test_parse_named_marker(self):
+        from cypilot.commands.kit import _parse_segments
+        text = '`@cpt:rule:prereq-load`\ncontent\n`@/cpt:rule:prereq-load`\n'
+        segs = _parse_segments(text)
+        markers = [s for s in segs if s.kind == "marker"]
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(markers[0].marker_type, "rule")
+        self.assertEqual(markers[0].explicit_id, "prereq-load")
+        self.assertEqual(markers[0].marker_key, "rule:prereq-load")
+
+    def test_named_markers_no_positional_index(self):
+        from cypilot.commands.kit import _parse_segments
+        text = (
+            '`@cpt:rule:alpha`\nA\n`@/cpt:rule:alpha`\n'
+            '`@cpt:rule:beta`\nB\n`@/cpt:rule:beta`\n'
+        )
+        segs = _parse_segments(text)
+        markers = [s for s in segs if s.kind == "marker"]
+        self.assertEqual(markers[0].marker_key, "rule:alpha")
+        self.assertEqual(markers[1].marker_key, "rule:beta")
+        self.assertNotIn("#", markers[0].marker_key)
+
+    def test_mixed_named_and_legacy(self):
+        from cypilot.commands.kit import _parse_segments
+        text = (
+            '`@cpt:rule:named-one`\nA\n`@/cpt:rule:named-one`\n'
+            '`@cpt:rule`\nB\n`@/cpt:rule`\n'
+        )
+        segs = _parse_segments(text)
+        markers = [s for s in segs if s.kind == "marker"]
+        self.assertEqual(markers[0].marker_key, "rule:named-one")
+        self.assertEqual(markers[1].marker_key, "rule#0")
+
+    def test_closing_tag_must_match_id(self):
+        from cypilot.commands.kit import _parse_segments
+        text = '`@cpt:rule:alpha`\ncontent\n`@/cpt:rule`\n'
+        segs = _parse_segments(text)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0].kind, "text")
+
+    def test_explicit_id_overrides_toml(self):
+        from cypilot.commands.kit import _marker_identity_key
+        key = _marker_identity_key("heading", 'id = "prd-title"\nlevel = 1\n', "custom-id")
+        self.assertEqual(key, "heading:custom-id")
+
+    def test_singleton_ignores_explicit_id(self):
+        from cypilot.commands.kit import _marker_identity_key
+        key = _marker_identity_key("blueprint", "", "some-id")
+        self.assertEqual(key, "blueprint")
+
+    def test_singleton_markers_all(self):
+        from cypilot.commands.kit import _marker_identity_key
+        for mt in ("blueprint", "skill", "system-prompt", "rules", "checklist"):
+            key = _marker_identity_key(mt, "")
+            self.assertEqual(key, mt, f"Singleton {mt} should return type as key")
+
+    def test_heading_with_id_field(self):
+        from cypilot.commands.kit import _marker_identity_key
+        key = _marker_identity_key("heading", 'id = "prd-title"\nlevel = 1\n')
+        self.assertEqual(key, "heading:prd-title")
+
+    def test_id_marker_kind(self):
+        from cypilot.commands.kit import _marker_identity_key
+        key = _marker_identity_key("id", 'kind = "fr"\n')
+        self.assertEqual(key, "id:fr")
+
+    def test_id_marker_no_kind(self):
+        from cypilot.commands.kit import _marker_identity_key
+        key = _marker_identity_key("id", "")
+        self.assertEqual(key, "id")
+
+    def test_fallback_type(self):
+        from cypilot.commands.kit import _marker_identity_key
+        key = _marker_identity_key("example", "some content\n")
+        self.assertEqual(key, "example")
+
+
+# =========================================================================
+# _derive_marker_id
+# =========================================================================
+
+class TestDeriveMarkerId(unittest.TestCase):
+    """Tests for legacy marker ID derivation."""
+
+    def test_heading_uses_toml_id(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("heading", 'id = "prd-title"\n'), "prd-title")
+
+    def test_heading_no_id_returns_empty(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("heading", 'level = 1\n'), "")
+
+    def test_id_uses_kind(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("id", 'kind = "fr"\n'), "fr")
+
+    def test_workflow_uses_name(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("workflow", 'name = "pr-review"\n'), "pr-review")
+
+    def test_check_lowercased(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("check", 'id = "BIZ-PRD-001"\n'), "biz-prd-001")
+
+    def test_check_empty(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("check", ""), "")
+
+    def test_rule_kind_section(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(
+            _derive_marker_id("rule", 'kind = "req"\nsection = "structural"\n'),
+            "req-structural",
+        )
+
+    def test_rule_kind_only(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("rule", 'kind = "prereq"\n'), "prereq")
+
+    def test_rule_section_only(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("rule", 'section = "structural"\n'), "structural")
+
+    def test_rule_empty(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("rule", ""), "")
+
+    def test_prompt_uses_heading_id(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("prompt", "", "prd-overview"), "prd-overview")
+
+    def test_example_uses_heading_id(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("example", "", "feat-intro"), "feat-intro")
+
+    def test_unknown_type_returns_empty(self):
+        from cypilot.commands.kit import _derive_marker_id
+        self.assertEqual(_derive_marker_id("unknown", "data\n"), "")
+
+
+# =========================================================================
+# _upgrade_legacy_tags
+# =========================================================================
+
+class TestUpgradeLegacyTags(unittest.TestCase):
+    """Tests for legacy → named syntax rewriting."""
+
+    def test_upgrades_heading_tag(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw = '`@cpt:heading`\n```toml\nid = "prd-title"\nlevel = 1\n```\n`@/cpt:heading`\n'
+        parts = [(raw, "heading#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 1)
+        self.assertIn("`@cpt:heading:prd-title`", result[0][0])
+        self.assertIn("`@/cpt:heading:prd-title`", result[0][0])
+
+    def test_skips_singleton(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw = '`@cpt:blueprint`\n```toml\nkit = "sdlc"\n```\n`@/cpt:blueprint`\n'
+        parts = [(raw, "blueprint#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 0)
+        self.assertEqual(result[0][0], raw)
+
+    def test_skips_already_named(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw = '`@cpt:rule:prereq-load`\ncontent\n`@/cpt:rule:prereq-load`\n'
+        parts = [(raw, "rule:prereq-load")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 0)
+        self.assertEqual(result[0][0], raw)
+
+    def test_skips_text_segments(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        parts = [("plain text\n", None)]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 0)
+        self.assertEqual(result[0][0], "plain text\n")
+
+    def test_skips_no_derivable_id(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw = '`@cpt:heading`\n```toml\nlevel = 1\n```\n`@/cpt:heading`\n'
+        parts = [(raw, "heading:L1#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 0)
+
+    def test_disambiguates_duplicates(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw1 = '`@cpt:rule`\n```toml\nkind = "req"\nsection = "structural"\n```\n`@/cpt:rule`\n'
+        raw2 = '`@cpt:rule`\n```toml\nkind = "req"\nsection = "structural"\n```\n`@/cpt:rule`\n'
+        parts = [(raw1, "rule#0"), (raw2, "rule#1")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 2)
+        self.assertIn("`@cpt:rule:req-structural`", result[0][0])
+        self.assertIn("`@cpt:rule:req-structural-1`", result[1][0])
+
+    def test_tracks_heading_id_for_prompt(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        h_raw = '`@cpt:heading`\n```toml\nid = "overview"\nlevel = 1\n```\n`@/cpt:heading`\n'
+        p_raw = '`@cpt:prompt`\ncontent\n`@/cpt:prompt`\n'
+        parts = [(h_raw, "heading:overview#0"), (p_raw, "prompt#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertIn("`@cpt:prompt:overview`", result[1][0])
+
+    def test_tracks_heading_id_from_named_marker(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        h_raw = '`@cpt:heading:intro`\ncontent\n`@/cpt:heading:intro`\n'
+        p_raw = '`@cpt:prompt`\ncontent\n`@/cpt:prompt`\n'
+        parts = [(h_raw, "heading:intro"), (p_raw, "prompt#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertIn("`@cpt:prompt:intro`", result[1][0])
+
+    def test_upgrades_workflow(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw = '`@cpt:workflow`\n```toml\nname = "pr-review"\n```\n`@/cpt:workflow`\n'
+        parts = [(raw, "workflow:pr-review#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 1)
+        self.assertIn("`@cpt:workflow:pr-review`", result[0][0])
+
+    def test_upgrades_check(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw = '`@cpt:check`\n```toml\nid = "BIZ-001"\n```\n`@/cpt:check`\n'
+        parts = [(raw, "check#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 1)
+        self.assertIn("`@cpt:check:biz-001`", result[0][0])
+
+    def test_upgrades_id_marker(self):
+        from cypilot.commands.kit import _upgrade_legacy_tags
+        raw = '`@cpt:id`\n```toml\nkind = "fr"\n```\n`@/cpt:id`\n'
+        parts = [(raw, "id:fr#0")]
+        result, upgraded = _upgrade_legacy_tags(parts)
+        self.assertEqual(len(upgraded), 1)
+        self.assertIn("`@cpt:id:fr`", result[0][0])
+
+
+# =========================================================================
+# Three-way merge — new instructions
+# =========================================================================
+
+class TestThreeWayMergeExtended(unittest.TestCase):
+    """Tests for new merge instructions: user-added, ref-removed, forward fallback, upgrade."""
+
+    def test_user_added_marker_kept(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old_ref = '`@cpt:skill`\nOld\n`@/cpt:skill`\n'
+        new_ref = '`@cpt:skill`\nNew\n`@/cpt:skill`\n'
+        user = (
+            '`@cpt:skill`\nOld\n`@/cpt:skill`\n'
+            '`@cpt:rule`\n```toml\nkind = "custom"\n```\nUser rule\n`@/cpt:rule`\n'
+        )
+        merged, report = _three_way_merge_blueprint(old_ref, new_ref, user)
+        self.assertIn("User rule", merged)
+        self.assertIn("New", merged)
+
+    def test_ref_removed_marker_kept(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old_ref = (
+            '`@cpt:skill`\nA\n`@/cpt:skill`\n'
+            '`@cpt:rule`\n```toml\nkind = "old"\n```\nOld rule\n`@/cpt:rule`\n'
+        )
+        new_ref = '`@cpt:skill`\nA\n`@/cpt:skill`\n'
+        user = (
+            '`@cpt:skill`\nA\n`@/cpt:skill`\n'
+            '`@cpt:rule`\n```toml\nkind = "old"\n```\nOld rule\n`@/cpt:rule`\n'
+        )
+        merged, report = _three_way_merge_blueprint(old_ref, new_ref, user)
+        self.assertIn("Old rule", merged)
+
+    def test_insert_new_with_forward_fallback(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old_ref = '`@cpt:skill`\nSkill\n`@/cpt:skill`\n'
+        new_ref = (
+            '`@cpt:rule`\n```toml\nkind = "new"\n```\nNew rule\n`@/cpt:rule`\n'
+            '`@cpt:skill`\nSkill\n`@/cpt:skill`\n'
+        )
+        user = '`@cpt:skill`\nSkill\n`@/cpt:skill`\n'
+        merged, report = _three_way_merge_blueprint(old_ref, new_ref, user)
+        self.assertIn("New rule", merged)
+        self.assertEqual(len(report["inserted"]), 1)
+        rule_pos = merged.find("New rule")
+        skill_pos = merged.find("Skill")
+        self.assertLess(rule_pos, skill_pos)
+
+    def test_merge_with_named_markers(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old_ref = '`@cpt:rule:alpha`\nOld A\n`@/cpt:rule:alpha`\n'
+        new_ref = '`@cpt:rule:alpha`\nNew A\n`@/cpt:rule:alpha`\n'
+        user = '`@cpt:rule:alpha`\nOld A\n`@/cpt:rule:alpha`\n'
+        merged, report = _three_way_merge_blueprint(old_ref, new_ref, user)
+        self.assertIn("New A", merged)
+        self.assertEqual(len(report["updated"]), 1)
+
+    def test_upgrade_report_in_merge(self):
+        from cypilot.commands.kit import _three_way_merge_blueprint
+        old_ref = '`@cpt:heading`\n```toml\nid = "title"\nlevel = 1\n```\n`@/cpt:heading`\n'
+        new_ref = '`@cpt:heading`\n```toml\nid = "title"\nlevel = 1\n```\n`@/cpt:heading`\n'
+        user = '`@cpt:heading`\n```toml\nid = "title"\nlevel = 1\n```\n`@/cpt:heading`\n'
+        merged, report = _three_way_merge_blueprint(old_ref, new_ref, user)
+        self.assertIn("upgraded", report)
+        self.assertGreaterEqual(len(report["upgraded"]), 1)
+        self.assertIn("`@cpt:heading:title`", merged)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -519,6 +519,43 @@ class TestValidateToc:
         broken = [e for e in result["errors"] if e["code"] == "toc-anchor-broken"]
         assert broken[0]["line"] == 5  # line of the broken TOC entry
 
+    def test_toml_comments_in_code_fence_ignored(self):
+        """TOML comments (# ...) inside code fences must not be treated as headings."""
+        content = (
+            "# Title\n\n"
+            "## Table of Contents\n\n"
+            "1. [Section A](#section-a)\n"
+            "2. [Section B](#section-b)\n\n"
+            "---\n\n"
+            "## Section A\n\n"
+            "```toml\n"
+            "# This is a TOML comment, not a heading\n"
+            "[some_table]\n"
+            "key = \"value\"\n"
+            "```\n\n"
+            "## Section B\n"
+        )
+        result = validate_toc(content, max_heading_level=2)
+        assert result["errors"] == [], f"Unexpected errors: {result['errors']}"
+        assert result["warnings"] == [], f"Unexpected warnings: {result['warnings']}"
+
+    def test_toml_comments_in_fence_between_toc_and_heading(self):
+        """Code fence with TOML comments between TOC and first heading."""
+        content = (
+            "# Title\n\n"
+            "## Table of Contents\n\n"
+            "1. [Overview](#overview)\n\n"
+            "```toml\n"
+            "# Artifact kind comment\n"
+            "artifact = \"TEST\"\n"
+            "```\n\n"
+            "---\n\n"
+            "## Overview\n\n"
+            "Content here.\n"
+        )
+        result = validate_toc(content, max_heading_level=2)
+        assert result["errors"] == [], f"Unexpected errors: {result['errors']}"
+
 
 # ---------------------------------------------------------------------------
 # cmd_validate_toc (integration)

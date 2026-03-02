@@ -137,6 +137,7 @@ def _write_kit_gen_outputs(
     # @cpt-end:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-write-skill
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-write-workflow
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-write-workflow
     for wf in summary.get("workflows", []):
         wf_name = wf["name"]
         wf_path = gen_kits_dir / kit_slug / "workflows" / f"{wf_name}.md"
@@ -154,10 +155,13 @@ def _write_kit_gen_outputs(
             encoding="utf-8",
         )
         result["workflows_written"].append(wf_name)
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-write-workflow
     # @cpt-end:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-write-workflow
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-return-gen-outputs
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-return-workflows
     return result
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-return-workflows
     # @cpt-end:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-return-gen-outputs
 
 
@@ -631,9 +635,12 @@ def cmd_generate_resources(argv: List[str]) -> int:
 # @cpt-algo:cpt-cypilot-algo-blueprint-system-three-way-merge:p1
 # ---------------------------------------------------------------------------
 
-# Regex mirrors blueprint.py parser
-_MIG_OPEN_RE = re.compile(r"^`@cpt:(\w[\w-]*)` *$")
-_MIG_CLOSE_RE = re.compile(r"^`@/cpt:(\w[\w-]*)` *$")
+# Regex mirrors blueprint.py parser — supports both legacy and named syntax
+# @cpt-begin:cpt-cypilot-algo-blueprint-system-parse-blueprint:p1:inst-derive-identity-key
+_MIG_OPEN_RE = re.compile(r"^`@cpt:(\w[\w-]*)(?::(\w[\w-]*))?` *$")
+_MIG_CLOSE_RE = re.compile(r"^`@/cpt:(\w[\w-]*)(?::(\w[\w-]*))?` *$")
+
+_SINGLETON_MARKERS = frozenset({"blueprint", "skill", "system-prompt", "rules", "checklist"})
 
 
 @dataclass
@@ -643,20 +650,27 @@ class _Segment:
     raw: str            # full raw text (including open/close tags for markers)
     marker_type: str = ""   # e.g. "heading", "workflow", "skill" (empty for text)
     marker_key: str = ""    # stable identity key
+    explicit_id: str = ""   # ID from named syntax @cpt:TYPE:ID (empty for legacy)
 
 
-def _marker_identity_key(marker_type: str, raw_content: str) -> str:
+def _marker_identity_key(marker_type: str, raw_content: str, explicit_id: str = "") -> str:
     """Derive a stable identity key for a marker from its type and TOML data.
 
-    Keys:
-      blueprint        → "blueprint"
-      skill            → "skill"
-      workflow:{name}   → workflow identified by name
-      heading:{template} → heading identified by template text
-      id:{kind}        → id marker by kind
-      example:{index}  → fallback positional (handled by caller)
-      {type}:{index}   → fallback positional (handled by caller)
+    Resolution chain (highest priority first):
+      1. Explicit syntax ID: @cpt:TYPE:ID → "TYPE:ID"
+      2. Singleton markers: blueprint, skill, system-prompt, rules, checklist → TYPE
+      3. TOML-derived key: heading:{id}, workflow:{name}, id:{kind}
+      4. Positional fallback: TYPE (caller appends #N index)
     """
+    # 1. Singleton markers — type IS the key
+    if marker_type in _SINGLETON_MARKERS:
+        return marker_type
+
+    # 2. Explicit syntax ID (highest priority for non-singletons)
+    if explicit_id:
+        return f"{marker_type}:{explicit_id}"
+
+    # 3. TOML-derived key
     # Quick TOML key extraction without full parser
     def _toml_val(key: str) -> str:
         for line in raw_content.splitlines():
@@ -666,14 +680,10 @@ def _marker_identity_key(marker_type: str, raw_content: str) -> str:
                 return val.strip().strip('"').strip("'")
         return ""
 
-    if marker_type in ("blueprint", "skill"):
-        return marker_type
     if marker_type == "workflow":
         name = _toml_val("name")
         return f"workflow:{name}" if name else "workflow"
     if marker_type == "heading":
-        # Use the stable `id` field as primary key; fall back to level.
-        # Duplicate same-level headings are disambiguated by positional index.
         hid = _toml_val("id")
         if hid:
             return f"heading:{hid}"
@@ -682,6 +692,8 @@ def _marker_identity_key(marker_type: str, raw_content: str) -> str:
     if marker_type == "id":
         kind = _toml_val("kind")
         return f"id:{kind}" if kind else "id"
+
+    # 4. Fallback to type (caller appends positional index)
     return marker_type
 
 
@@ -710,6 +722,7 @@ def _parse_segments(text: str) -> List[_Segment]:
             text_buf = []
 
         marker_type = m_open.group(1)
+        explicit_id = m_open.group(2) or ""
         marker_lines: List[str] = [lines[i]]
         j = i + 1
         found_close = False
@@ -717,7 +730,7 @@ def _parse_segments(text: str) -> List[_Segment]:
             marker_lines.append(lines[j])
             close_stripped = lines[j].rstrip("\n\r")
             m_close = _MIG_CLOSE_RE.match(close_stripped.strip())
-            if m_close and m_close.group(1) == marker_type:
+            if m_close and m_close.group(1) == marker_type and (m_close.group(2) or "") == explicit_id:
                 found_close = True
                 j += 1
                 break
@@ -733,24 +746,27 @@ def _parse_segments(text: str) -> List[_Segment]:
         # Content between open and close tags (for identity extraction)
         content_lines = marker_lines[1:-1]
         raw_content = "".join(content_lines)
-        key = _marker_identity_key(marker_type, raw_content)
+        key = _marker_identity_key(marker_type, raw_content, explicit_id)
 
         segments.append(_Segment(
             kind="marker",
             raw=raw,
             marker_type=marker_type,
             marker_key=key,
+            explicit_id=explicit_id,
         ))
         i = j
 
     if text_buf:
         segments.append(_Segment(kind="text", raw="".join(text_buf)))
 
-    # Always add positional index per base key for consistent matching
-    # across files that may have different numbers of markers.
+    # Add positional index per base key for markers WITHOUT explicit syntax ID.
+    # Named markers (@cpt:TYPE:ID) already have unique keys and skip indexing.
     key_seen: Dict[str, int] = {}
     for seg in segments:
         if seg.kind != "marker":
+            continue
+        if seg.explicit_id:
             continue
         base = seg.marker_key
         idx = key_seen.get(base, 0)
@@ -758,6 +774,131 @@ def _parse_segments(text: str) -> List[_Segment]:
         seg.marker_key = f"{base}#{idx}"
 
     return segments
+# @cpt-end:cpt-cypilot-algo-blueprint-system-parse-blueprint:p1:inst-derive-identity-key
+
+
+def _derive_marker_id(marker_type: str, raw_content: str, preceding_heading_id: str = "") -> str:
+    """Derive a kebab-case ID for a legacy marker based on its type and TOML content.
+
+    Used by the legacy marker upgrade step to convert @cpt:TYPE → @cpt:TYPE:ID.
+    """
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+    def _toml_val(key: str) -> str:
+        for line in raw_content.splitlines():
+            stripped = line.strip()
+            if (stripped.startswith(f"{key} ") or stripped.startswith(f"{key}=")) and "=" in stripped:
+                _, _, val = stripped.partition("=")
+                return val.strip().strip('"').strip("'")
+        return ""
+
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-heading
+    if marker_type == "heading":
+        return _toml_val("id") or ""
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-heading
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-id
+    if marker_type == "id":
+        return _toml_val("kind") or ""
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-id
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-workflow
+    if marker_type == "workflow":
+        return _toml_val("name") or ""
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-workflow
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-check
+    if marker_type == "check":
+        cid = _toml_val("id")
+        return cid.lower() if cid else ""
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-check
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-rule
+    if marker_type == "rule":
+        kind = _toml_val("kind")
+        section = _toml_val("section")
+        if kind and section:
+            return f"{kind}-{section}"
+        return kind or section or ""
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-rule
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-prompt-example
+    if marker_type in ("prompt", "example"):
+        return preceding_heading_id
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-prompt-example
+    return ""
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+
+
+def _upgrade_legacy_tags(merged_parts: List[tuple]) -> tuple:
+    """Rewrite legacy @cpt:TYPE tags to @cpt:TYPE:ID in merged output.
+
+    Skips singleton markers and markers that already have explicit IDs.
+    Derives IDs from TOML content per marker type.
+
+    Returns (updated_parts, upgraded_keys).
+    """
+    upgraded: List[str] = []
+    last_heading_id = ""
+    id_counts: Dict[str, int] = {}
+    result: List[tuple] = []
+
+    for raw, key in merged_parts:
+        if key is None:
+            result.append((raw, key))
+            continue
+
+        # Parse opening tag to check if already named
+        lines_list = raw.splitlines(keepends=True)
+        if not lines_list:
+            result.append((raw, key))
+            continue
+        first_line = lines_list[0].rstrip("\n\r").strip()
+        m = _MIG_OPEN_RE.match(first_line)
+        if not m:
+            result.append((raw, key))
+            continue
+
+        # Track heading IDs from already-named markers
+        if m.group(2):
+            if m.group(1) == "heading":
+                last_heading_id = m.group(2)
+            result.append((raw, key))
+            continue
+
+        marker_type = m.group(1)
+        if marker_type in _SINGLETON_MARKERS:
+            result.append((raw, key))
+            continue
+
+        # Extract content between tags for ID derivation
+        content = "".join(lines_list[1:-1]) if len(lines_list) > 2 else ""
+        derived_id = _derive_marker_id(marker_type, content, last_heading_id)
+
+        if not derived_id:
+            result.append((raw, key))
+            continue
+
+        # Disambiguate duplicate IDs: append -1, -2, etc.
+        count_key = f"{marker_type}:{derived_id}"
+        count = id_counts.get(count_key, 0)
+        id_counts[count_key] = count + 1
+        final_id = derived_id if count == 0 else f"{derived_id}-{count}"
+
+        if marker_type == "heading":
+            last_heading_id = final_id
+
+        # Rewrite opening and closing tags
+        new_raw = re.sub(
+            r"^`@cpt:" + re.escape(marker_type) + r"`( *)$",
+            "`@cpt:" + marker_type + ":" + final_id + "`\\1",
+            raw, count=1, flags=re.MULTILINE,
+        )
+        new_raw = re.sub(
+            r"^`@/cpt:" + re.escape(marker_type) + r"`( *)$",
+            "`@/cpt:" + marker_type + ":" + final_id + "`\\1",
+            new_raw, count=1, flags=re.MULTILINE,
+        )
+
+        if new_raw != raw:
+            upgraded.append(key)
+        result.append((new_raw, key))
+
+    return result, upgraded
 
 
 def _three_way_merge_blueprint(
@@ -777,6 +918,8 @@ def _three_way_merge_blueprint(
         - updated: list of marker keys that were updated
         - skipped: list of marker keys skipped (user customized)
         - kept: list of marker keys kept as-is (no change in reference)
+        - inserted: list of marker keys inserted (new in reference)
+        - upgraded: list of marker keys upgraded from legacy to named syntax
     """
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-parse-three
     old_segments = _parse_segments(old_ref_text)
@@ -813,25 +956,29 @@ def _three_way_merge_blueprint(
         old_raw = old_map.get(key)
         new_raw = new_map.get(key)
 
-        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-user-added
         if old_raw is None:
             # Marker not in old reference — user-added or unknown, keep as-is
             merged_parts.append((seg.raw, key))
             kept.append(key)
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-user-added
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-ref-removed
         elif new_raw is None:
             # Marker removed in new reference — keep user's version
             merged_parts.append((seg.raw, key))
             kept.append(key)
-        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-ref-removed
         # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-update-unmodified
         elif seg.raw == old_raw:
             # User hasn't changed it — safe to update
             if new_raw != old_raw:
                 merged_parts.append((new_raw, key))
                 updated.append(key)
+            # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-unchanged
             else:
                 merged_parts.append((seg.raw, key))
                 kept.append(key)
+            # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-unchanged
         # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-update-unmodified
         else:
             # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-preserve-user
@@ -840,6 +987,11 @@ def _three_way_merge_blueprint(
             skipped.append(key)
             # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-preserve-user
     # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-apply-merge
+
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
+    # Markers present in old_map but absent from user segments are NOT re-inserted,
+    # even if present in new_map — handled implicitly by walking user_segments only.
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-new
     # Insert markers that are truly new (in new_ref but NOT in old_ref)
@@ -853,6 +1005,7 @@ def _three_way_merge_blueprint(
         if seg.marker_key in seen_keys or seg.marker_key in old_map:
             continue
 
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-find-anchor
         # Find nearest preceding known marker in new_segments as anchor
         anchor_key = None
         for pi in range(ni - 1, -1, -1):
@@ -860,25 +1013,48 @@ def _three_way_merge_blueprint(
             if prev.kind == "marker" and prev.marker_key in seen_keys:
                 anchor_key = prev.marker_key
                 break
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-find-anchor
 
-        # Find anchor position in merged_parts and insert after it
-        insert_idx = len(merged_parts)
+        insert_idx = len(merged_parts)  # default: append at end
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-after-anchor
         if anchor_key is not None:
             for mi in range(len(merged_parts) - 1, -1, -1):
                 if merged_parts[mi][1] == anchor_key:
                     insert_idx = mi + 1
                     break
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-after-anchor
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-fallback
+        elif anchor_key is None:
+            # No preceding anchor found — search forward for nearest following
+            # known marker in new_segments and insert before it
+            for fi in range(ni + 1, len(new_segments)):
+                fwd = new_segments[fi]
+                if fwd.kind == "marker" and fwd.marker_key in seen_keys:
+                    fwd_key = fwd.marker_key
+                    for mi in range(len(merged_parts)):
+                        if merged_parts[mi][1] == fwd_key:
+                            insert_idx = mi
+                            break
+                    break
+            # If still no match, insert_idx stays at len(merged_parts) — append
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-fallback
 
         merged_parts.insert(insert_idx, (seg.raw, seg.marker_key))
         inserted.append(seg.marker_key)
         seen_keys.add(seg.marker_key)
     # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-new
 
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+    # Upgrade legacy markers to named syntax in the merged output
+    merged_parts, upgraded = _upgrade_legacy_tags(merged_parts)
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-return-merge
     merged_text = "".join(part[0] for part in merged_parts)
     report = {
         "updated": updated, "skipped": skipped,
         "kept": kept, "inserted": inserted,
+        "upgraded": upgraded,
     }
     return merged_text, report
     # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-return-merge
