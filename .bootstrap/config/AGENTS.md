@@ -52,4 +52,20 @@ NEVER edit files inside `{cypilot_path}/.core/` or `{cypilot_path}/.gen/` direct
 
 ALWAYS open and follow `architecture/specs/CLISPEC.md` WHEN writing CLI commands, modifying command dispatch, or adding new subcommands
 
+ALWAYS open and follow `CONTRIBUTING.md#development-setup` WHEN setting up development environment or onboarding
+
+ALWAYS open and follow `CONTRIBUTING.md#project-architecture-self-hosted-bootstrap` WHEN editing bootstrap files or understanding the .bootstrap/ directory structure
+
+ALWAYS open and follow `CONTRIBUTING.md#versioning` WHEN bumping versions, releasing, or tagging
+
+ALWAYS open and follow `CONTRIBUTING.md#commit-requirements-dco` WHEN committing code or preparing commits
+
+ALWAYS open and follow `CONTRIBUTING.md#ci-pipeline` WHEN running CI checks, make targets, or debugging build failures
+
+ALWAYS open and follow `CONTRIBUTING.md#making-changes` WHEN making code changes, architecture changes, or kit blueprint changes
+
+ALWAYS open and follow `CONTRIBUTING.md#pull-request-process` WHEN creating or reviewing pull requests
+
+ALWAYS open and follow `CONTRIBUTING.md#code-style-and-conventions` WHEN writing or reviewing code
+
 <!-- auto-config:docs:end -->

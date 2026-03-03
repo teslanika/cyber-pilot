@@ -282,6 +282,56 @@ class TestParseHeadingsUnified:
         result = parse_headings(lines)
         assert result == [(2, "Before"), (2, "After")]
 
+    def test_fence_with_info_string_not_a_closer(self):
+        """A line like '```python' inside a fence must NOT close it (CommonMark §4.5)."""
+        lines = [
+            "## Before",
+            "```python",
+            "## Inside code",
+            "```python",       # NOT a closer — has info string
+            "## Still inside",
+            "```",             # real closer
+            "## After",
+        ]
+        result = parse_headings(lines)
+        assert result == [(2, "Before"), (2, "After")]
+
+    def test_fence_closer_with_trailing_spaces_ok(self):
+        """Closing fence with trailing whitespace is valid."""
+        lines = [
+            "## Before",
+            "```",
+            "## Inside",
+            "```   ",          # valid closer — only whitespace after
+            "## After",
+        ]
+        result = parse_headings(lines)
+        assert result == [(2, "Before"), (2, "After")]
+
+    def test_indented_4_spaces_not_a_fence(self):
+        """4+ leading spaces is an indented code block, not a fence (CommonMark §4.5)."""
+        lines = [
+            "## Before",
+            "    ```python",   # 4 spaces — NOT a fence opener
+            "## Middle",
+            "    ```",         # 4 spaces — NOT a fence closer
+            "## After",
+        ]
+        result = parse_headings(lines)
+        assert result == [(2, "Before"), (2, "Middle"), (2, "After")]
+
+    def test_indented_3_spaces_is_a_fence(self):
+        """Up to 3 leading spaces is still a valid fence opener."""
+        lines = [
+            "## Before",
+            "   ```",          # 3 spaces — valid fence
+            "## Inside",
+            "   ```",          # 3 spaces — valid closer
+            "## After",
+        ]
+        result = parse_headings(lines)
+        assert result == [(2, "Before"), (2, "After")]
+
 
 # ---------------------------------------------------------------------------
 # Unified module: build_toc (numbered mode)
@@ -518,6 +568,43 @@ class TestValidateToc:
         result = validate_toc(content, max_heading_level=2)
         broken = [e for e in result["errors"] if e["code"] == "toc-anchor-broken"]
         assert broken[0]["line"] == 5  # line of the broken TOC entry
+
+    def test_toml_comments_in_code_fence_ignored(self):
+        """TOML comments (# ...) inside code fences must not be treated as headings."""
+        content = (
+            "# Title\n\n"
+            "## Table of Contents\n\n"
+            "1. [Section A](#section-a)\n"
+            "2. [Section B](#section-b)\n\n"
+            "---\n\n"
+            "## Section A\n\n"
+            "```toml\n"
+            "# This is a TOML comment, not a heading\n"
+            "[some_table]\n"
+            "key = \"value\"\n"
+            "```\n\n"
+            "## Section B\n"
+        )
+        result = validate_toc(content, max_heading_level=2)
+        assert result["errors"] == [], f"Unexpected errors: {result['errors']}"
+        assert result["warnings"] == [], f"Unexpected warnings: {result['warnings']}"
+
+    def test_toml_comments_in_fence_between_toc_and_heading(self):
+        """Code fence with TOML comments between TOC and first heading."""
+        content = (
+            "# Title\n\n"
+            "## Table of Contents\n\n"
+            "1. [Overview](#overview)\n\n"
+            "```toml\n"
+            "# Artifact kind comment\n"
+            "artifact = \"TEST\"\n"
+            "```\n\n"
+            "---\n\n"
+            "## Overview\n\n"
+            "Content here.\n"
+        )
+        result = validate_toc(content, max_heading_level=2)
+        assert result["errors"] == [], f"Unexpected errors: {result['errors']}"
 
 
 # ---------------------------------------------------------------------------

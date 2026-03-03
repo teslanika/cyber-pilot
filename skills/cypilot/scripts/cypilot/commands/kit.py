@@ -137,6 +137,7 @@ def _write_kit_gen_outputs(
     # @cpt-end:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-write-skill
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-write-workflow
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-write-workflow
     for wf in summary.get("workflows", []):
         wf_name = wf["name"]
         wf_path = gen_kits_dir / kit_slug / "workflows" / f"{wf_name}.md"
@@ -154,10 +155,13 @@ def _write_kit_gen_outputs(
             encoding="utf-8",
         )
         result["workflows_written"].append(wf_name)
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-write-workflow
     # @cpt-end:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-write-workflow
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-return-gen-outputs
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-return-workflows
     return result
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-generate-workflows:p2:inst-return-workflows
     # @cpt-end:cpt-cypilot-algo-blueprint-system-write-gen-outputs:p1:inst-return-gen-outputs
 
 
@@ -631,9 +635,12 @@ def cmd_generate_resources(argv: List[str]) -> int:
 # @cpt-algo:cpt-cypilot-algo-blueprint-system-three-way-merge:p1
 # ---------------------------------------------------------------------------
 
-# Regex mirrors blueprint.py parser
-_MIG_OPEN_RE = re.compile(r"^`@cpt:(\w[\w-]*)` *$")
-_MIG_CLOSE_RE = re.compile(r"^`@/cpt:(\w[\w-]*)` *$")
+# Regex mirrors blueprint.py parser — supports both legacy and named syntax
+# @cpt-begin:cpt-cypilot-algo-blueprint-system-parse-blueprint:p1:inst-derive-identity-key
+_MIG_OPEN_RE = re.compile(r"^`@cpt:(\w[\w-]*)(?::(\w[\w-]*))?` *$")
+_MIG_CLOSE_RE = re.compile(r"^`@/cpt:(\w[\w-]*)(?::(\w[\w-]*))?` *$")
+
+_SINGLETON_MARKERS = frozenset({"blueprint", "skill", "system-prompt", "rules", "checklist"})
 
 
 @dataclass
@@ -643,20 +650,27 @@ class _Segment:
     raw: str            # full raw text (including open/close tags for markers)
     marker_type: str = ""   # e.g. "heading", "workflow", "skill" (empty for text)
     marker_key: str = ""    # stable identity key
+    explicit_id: str = ""   # ID from named syntax @cpt:TYPE:ID (empty for legacy)
 
 
-def _marker_identity_key(marker_type: str, raw_content: str) -> str:
+def _marker_identity_key(marker_type: str, raw_content: str, explicit_id: str = "") -> str:
     """Derive a stable identity key for a marker from its type and TOML data.
 
-    Keys:
-      blueprint        → "blueprint"
-      skill            → "skill"
-      workflow:{name}   → workflow identified by name
-      heading:{template} → heading identified by template text
-      id:{kind}        → id marker by kind
-      example:{index}  → fallback positional (handled by caller)
-      {type}:{index}   → fallback positional (handled by caller)
+    Resolution chain (highest priority first):
+      1. Explicit syntax ID: @cpt:TYPE:ID → "TYPE:ID"
+      2. Singleton markers: blueprint, skill, system-prompt, rules, checklist → TYPE
+      3. TOML-derived key: heading:{id}, workflow:{name}, id:{kind}
+      4. Positional fallback: TYPE (caller appends #N index)
     """
+    # 1. Singleton markers — type IS the key
+    if marker_type in _SINGLETON_MARKERS:
+        return marker_type
+
+    # 2. Explicit syntax ID (highest priority for non-singletons)
+    if explicit_id:
+        return f"{marker_type}:{explicit_id}"
+
+    # 3. TOML-derived key
     # Quick TOML key extraction without full parser
     def _toml_val(key: str) -> str:
         for line in raw_content.splitlines():
@@ -666,14 +680,10 @@ def _marker_identity_key(marker_type: str, raw_content: str) -> str:
                 return val.strip().strip('"').strip("'")
         return ""
 
-    if marker_type in ("blueprint", "skill"):
-        return marker_type
     if marker_type == "workflow":
         name = _toml_val("name")
         return f"workflow:{name}" if name else "workflow"
     if marker_type == "heading":
-        # Use the stable `id` field as primary key; fall back to level.
-        # Duplicate same-level headings are disambiguated by positional index.
         hid = _toml_val("id")
         if hid:
             return f"heading:{hid}"
@@ -682,6 +692,8 @@ def _marker_identity_key(marker_type: str, raw_content: str) -> str:
     if marker_type == "id":
         kind = _toml_val("kind")
         return f"id:{kind}" if kind else "id"
+
+    # 4. Fallback to type (caller appends positional index)
     return marker_type
 
 
@@ -710,6 +722,7 @@ def _parse_segments(text: str) -> List[_Segment]:
             text_buf = []
 
         marker_type = m_open.group(1)
+        explicit_id = m_open.group(2) or ""
         marker_lines: List[str] = [lines[i]]
         j = i + 1
         found_close = False
@@ -717,7 +730,7 @@ def _parse_segments(text: str) -> List[_Segment]:
             marker_lines.append(lines[j])
             close_stripped = lines[j].rstrip("\n\r")
             m_close = _MIG_CLOSE_RE.match(close_stripped.strip())
-            if m_close and m_close.group(1) == marker_type:
+            if m_close and m_close.group(1) == marker_type and (m_close.group(2) or "") == explicit_id:
                 found_close = True
                 j += 1
                 break
@@ -733,24 +746,27 @@ def _parse_segments(text: str) -> List[_Segment]:
         # Content between open and close tags (for identity extraction)
         content_lines = marker_lines[1:-1]
         raw_content = "".join(content_lines)
-        key = _marker_identity_key(marker_type, raw_content)
+        key = _marker_identity_key(marker_type, raw_content, explicit_id)
 
         segments.append(_Segment(
             kind="marker",
             raw=raw,
             marker_type=marker_type,
             marker_key=key,
+            explicit_id=explicit_id,
         ))
         i = j
 
     if text_buf:
         segments.append(_Segment(kind="text", raw="".join(text_buf)))
 
-    # Always add positional index per base key for consistent matching
-    # across files that may have different numbers of markers.
+    # Add positional index per base key for markers WITHOUT explicit syntax ID.
+    # Named markers (@cpt:TYPE:ID) already have unique keys and skip indexing.
     key_seen: Dict[str, int] = {}
     for seg in segments:
         if seg.kind != "marker":
+            continue
+        if seg.explicit_id:
             continue
         base = seg.marker_key
         idx = key_seen.get(base, 0)
@@ -758,12 +774,280 @@ def _parse_segments(text: str) -> List[_Segment]:
         seg.marker_key = f"{base}#{idx}"
 
     return segments
+# @cpt-end:cpt-cypilot-algo-blueprint-system-parse-blueprint:p1:inst-derive-identity-key
+
+
+def _kebab_safe(value: str) -> str:
+    """Normalize a string to a safe kebab-case token for marker IDs.
+
+    Lowercase, replace non-alphanumeric sequences with hyphens, strip edges.
+    """
+    result = re.sub(r"[^a-z0-9]+", "-", value.lower())
+    return result.strip("-")
+
+
+def _derive_marker_id(marker_type: str, raw_content: str, preceding_heading_id: str = "") -> str:
+    """Derive a kebab-case ID for a legacy marker based on its type and TOML content.
+
+    Used by the legacy marker upgrade step to convert @cpt:TYPE → @cpt:TYPE:ID.
+    """
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+    def _toml_val(key: str) -> str:
+        for line in raw_content.splitlines():
+            stripped = line.strip()
+            if (stripped.startswith(f"{key} ") or stripped.startswith(f"{key}=")) and "=" in stripped:
+                _, _, val = stripped.partition("=")
+                return val.strip().strip('"').strip("'")
+        return ""
+
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-heading
+    if marker_type == "heading":
+        return _kebab_safe(_toml_val("id"))
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-heading
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-id
+    if marker_type == "id":
+        return _kebab_safe(_toml_val("kind"))
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-id
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-workflow
+    if marker_type == "workflow":
+        return _kebab_safe(_toml_val("name"))
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-workflow
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-check
+    if marker_type == "check":
+        return _kebab_safe(_toml_val("id"))
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-check
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-rule
+    if marker_type == "rule":
+        kind = _toml_val("kind")
+        section = _toml_val("section")
+        if kind and section:
+            return _kebab_safe(f"{kind}-{section}")
+        return _kebab_safe(kind or section)
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-rule
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-prompt-example
+    if marker_type in ("prompt", "example"):
+        return _kebab_safe(preceding_heading_id)
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-prompt-example
+    return ""
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+
+
+def _upgrade_legacy_tags(merged_parts: List[tuple]) -> tuple:
+    """Rewrite legacy @cpt:TYPE tags to @cpt:TYPE:ID in merged output.
+
+    Skips singleton markers and markers that already have explicit IDs.
+    Derives IDs from TOML content per marker type.
+
+    Returns (updated_parts, upgraded_keys, upgraded_details).
+    """
+    upgraded: List[str] = []
+    upgraded_details: Dict[str, tuple] = {}  # key → (old_tag, new_tag)
+    last_heading_id = ""
+    id_counts: Dict[str, int] = {}
+    result: List[tuple] = []
+
+    for raw, key in merged_parts:
+        if key is None:
+            result.append((raw, key))
+            continue
+
+        # Parse opening tag to check if already named
+        lines_list = raw.splitlines(keepends=True)
+        if not lines_list:
+            result.append((raw, key))
+            continue
+        first_line = lines_list[0].rstrip("\n\r").strip()
+        m = _MIG_OPEN_RE.match(first_line)
+        if not m:
+            result.append((raw, key))
+            continue
+
+        # Track heading IDs from already-named markers
+        if m.group(2):
+            if m.group(1) == "heading":
+                last_heading_id = m.group(2)
+            result.append((raw, key))
+            continue
+
+        marker_type = m.group(1)
+        if marker_type in _SINGLETON_MARKERS:
+            result.append((raw, key))
+            continue
+
+        # Extract content between tags for ID derivation
+        content = "".join(lines_list[1:-1]) if len(lines_list) > 2 else ""
+        derived_id = _derive_marker_id(marker_type, content, last_heading_id)
+
+        if not derived_id:
+            result.append((raw, key))
+            continue
+
+        # Disambiguate duplicate IDs: append -1, -2, etc.
+        count_key = f"{marker_type}:{derived_id}"
+        count = id_counts.get(count_key, 0)
+        id_counts[count_key] = count + 1
+        final_id = derived_id if count == 0 else f"{derived_id}-{count}"
+
+        if marker_type == "heading":
+            last_heading_id = final_id
+
+        # Rewrite opening and closing tags
+        new_raw = re.sub(
+            r"^`@cpt:" + re.escape(marker_type) + r"`( *)$",
+            "`@cpt:" + marker_type + ":" + final_id + "`\\1",
+            raw, count=1, flags=re.MULTILINE,
+        )
+        new_raw = re.sub(
+            r"^`@/cpt:" + re.escape(marker_type) + r"`( *)$",
+            "`@/cpt:" + marker_type + ":" + final_id + "`\\1",
+            new_raw, count=1, flags=re.MULTILINE,
+        )
+
+        if new_raw != raw:
+            upgraded.append(key)
+            upgraded_details[key] = (
+                f"@cpt:{marker_type}",
+                f"@cpt:{marker_type}:{final_id}",
+            )
+        result.append((new_raw, key))
+
+    return result, upgraded, upgraded_details
+
+
+def _normalize_legacy_to_named(text: str, reference_text: str = "") -> tuple:
+    """Upgrade legacy @cpt:TYPE tags to @cpt:TYPE:ID in text for merge normalization.
+
+    When reference_text is provided, uses positional matching within each marker
+    type to map legacy markers to their named equivalents in the reference.
+    This handles all marker types, including those without derivable TOML IDs.
+
+    Falls back to TOML-based derivation when reference is not available.
+
+    Returns (normalized_text, upgraded_details) where upgraded_details maps
+    marker_key -> (old_tag, new_tag).
+    """
+    if not reference_text:
+        segments = _parse_segments(text)
+        parts = [(seg.raw, seg.marker_key if seg.kind == "marker" else None)
+                 for seg in segments]
+        normalized, _, upg_details = _upgrade_legacy_tags(parts)
+        return "".join(p[0] for p in normalized), upg_details
+
+    text_segments = _parse_segments(text)
+    ref_segments = _parse_segments(reference_text)
+
+    # Group markers by type for positional matching
+    ref_by_type: Dict[str, List[_Segment]] = {}
+    for seg in ref_segments:
+        if seg.kind == "marker":
+            ref_by_type.setdefault(seg.marker_type, []).append(seg)
+
+    text_by_type: Dict[str, List[_Segment]] = {}
+    for seg in text_segments:
+        if seg.kind == "marker":
+            text_by_type.setdefault(seg.marker_type, []).append(seg)
+
+    # Build upgrade map: text segment id → (marker_type, explicit_id from reference)
+    upgrade_map: Dict[int, tuple] = {}
+    for mtype, t_segs in text_by_type.items():
+        r_segs = ref_by_type.get(mtype, [])
+        if len(t_segs) != len(r_segs):
+            continue  # counts differ — can't safely map positionally
+        for t_seg, r_seg in zip(t_segs, r_segs):
+            if not t_seg.explicit_id and r_seg.explicit_id:
+                upgrade_map[id(t_seg)] = (mtype, r_seg.explicit_id)
+
+    # Rewrite tags in text segments
+    result_parts: List[str] = []
+    norm_details: Dict[str, tuple] = {}  # key → (old_tag, new_tag)
+    for seg in text_segments:
+        if seg.kind != "marker" or id(seg) not in upgrade_map:
+            result_parts.append(seg.raw)
+            continue
+
+        mtype, new_id = upgrade_map[id(seg)]
+        raw = seg.raw
+        raw = re.sub(
+            r"^`@cpt:" + re.escape(mtype) + r"`( *)$",
+            "`@cpt:" + mtype + ":" + new_id + "`\\1",
+            raw, count=1, flags=re.MULTILINE,
+        )
+        raw = re.sub(
+            r"^`@/cpt:" + re.escape(mtype) + r"`( *)$",
+            "`@/cpt:" + mtype + ":" + new_id + "`\\1",
+            raw, count=1, flags=re.MULTILINE,
+        )
+        result_parts.append(raw)
+        norm_details[seg.marker_key] = (
+            f"@cpt:{mtype}",
+            f"@cpt:{mtype}:{new_id}",
+        )
+
+    return "".join(result_parts), norm_details
+
+
+def _prompt_confirm(message: str, state: Dict[str, bool]) -> str:
+    """Interactive prompt returning 'y' or 'n'.
+
+    state['all'] tracks whether user already chose 'all' (auto-approve).
+    Prompts go to stderr, input from stdin.
+    """
+    if state.get("all"):
+        return "y"
+    sys.stderr.write(f"{message} [y/N/all (approve remaining files)] ")
+    sys.stderr.flush()
+    try:
+        response = input().strip().lower()
+    except EOFError:
+        return "n"
+    if response == "all":
+        state["all"] = True
+        return "y"
+    return "y" if response == "y" else "n"
+
+
+def _show_marker_content(raw: str, color: str = "red") -> None:
+    """Show marker content lines in a single color (red=removed, green=added)."""
+    code = "\033[31m" if color == "red" else "\033[32m"
+    for line in raw.splitlines():
+        sys.stderr.write(f"        {code}{line}\033[0m\n")
+
+
+def _show_marker_diff(key: str, user_raw: str, new_raw: str) -> None:
+    """Show compact unified diff between user and reference marker content."""
+    import difflib
+    user_lines = user_raw.splitlines(keepends=True)
+    new_lines = new_raw.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(
+        user_lines, new_lines,
+        fromfile=f"yours ({key})",
+        tofile=f"reference ({key})",
+        lineterm="",
+    ))
+    if not diff:
+        return
+    for line in diff:
+        line_s = line.rstrip("\n")
+        if line_s.startswith("+++") or line_s.startswith("---"):
+            sys.stderr.write(f"        {line_s}\n")
+        elif line_s.startswith("+"):
+            sys.stderr.write(f"        \033[32m{line_s}\033[0m\n")
+        elif line_s.startswith("-"):
+            sys.stderr.write(f"        \033[31m{line_s}\033[0m\n")
+        elif line_s.startswith("@@"):
+            sys.stderr.write(f"        \033[36m{line_s}\033[0m\n")
 
 
 def _three_way_merge_blueprint(
     old_ref_text: str,
     new_ref_text: str,
     user_text: str,
+    *,
+    force_keys: frozenset = frozenset(),
+    restore_keys: frozenset = frozenset(),
+    remove_keys: frozenset = frozenset(),
+    skip_keys: frozenset = frozenset(),
+    skip_insert_keys: frozenset = frozenset(),
 ) -> tuple:
     """Three-way merge of a blueprint at the @cpt: marker level.
 
@@ -771,13 +1055,26 @@ def _three_way_merge_blueprint(
         old_ref_text: Previous reference version (before update).
         new_ref_text: New reference version (after update).
         user_text: User's current config copy.
+        force_keys: Set of marker keys to force-update even if user customized.
+        restore_keys: Set of marker keys to restore (user deleted, re-insert from ref).
+        remove_keys: Set of marker keys to remove (reference deleted, user still has).
+        skip_keys: Set of marker keys to NOT update (keep user version even though ref changed).
+        skip_insert_keys: Set of marker keys to NOT insert (even though new in ref).
 
     Returns:
         (merged_text, report) where report is a dict with:
         - updated: list of marker keys that were updated
         - skipped: list of marker keys skipped (user customized)
         - kept: list of marker keys kept as-is (no change in reference)
+        - inserted: list of marker keys inserted (new in reference)
+        - deleted: list of marker keys user removed (still in reference)
+        - upgraded: list of marker keys upgraded from legacy to named syntax
     """
+    # Normalize legacy markers to named syntax before comparison.
+    # Uses new_ref as positional guide so ALL marker types get correct IDs.
+    old_ref_text, _ = _normalize_legacy_to_named(old_ref_text, new_ref_text)
+    user_text, norm_upgraded_details = _normalize_legacy_to_named(user_text, new_ref_text)
+
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-parse-three
     old_segments = _parse_segments(old_ref_text)
     new_segments = _parse_segments(new_ref_text)
@@ -799,7 +1096,11 @@ def _three_way_merge_blueprint(
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-apply-merge
     updated: List[str] = []
+    updated_details: Dict[str, tuple] = {}  # key → (old_raw, new_raw)
     skipped: List[str] = []
+    skipped_details: Dict[str, tuple] = {}  # key → (user_raw, new_raw)
+    ref_removed: List[str] = []
+    ref_removed_details: Dict[str, str] = {}  # key → user_raw
     kept: List[str] = []
     # Each element: (raw_text, marker_key or None)
     merged_parts: List[tuple] = []
@@ -813,46 +1114,82 @@ def _three_way_merge_blueprint(
         old_raw = old_map.get(key)
         new_raw = new_map.get(key)
 
-        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-user-added
         if old_raw is None:
             # Marker not in old reference — user-added or unknown, keep as-is
             merged_parts.append((seg.raw, key))
             kept.append(key)
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-user-added
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-ref-removed
         elif new_raw is None:
-            # Marker removed in new reference — keep user's version
-            merged_parts.append((seg.raw, key))
-            kept.append(key)
-        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
+            # Marker removed in new reference
+            if key in remove_keys:
+                # User approved removal — drop it
+                pass
+            else:
+                merged_parts.append((seg.raw, key))
+            ref_removed.append(key)
+            ref_removed_details[key] = seg.raw
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-ref-removed
         # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-update-unmodified
         elif seg.raw == old_raw:
             # User hasn't changed it — safe to update
-            if new_raw != old_raw:
+            if new_raw != old_raw and key not in skip_keys:
                 merged_parts.append((new_raw, key))
                 updated.append(key)
+                updated_details[key] = (old_raw, new_raw)
+            # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-unchanged
             else:
                 merged_parts.append((seg.raw, key))
                 kept.append(key)
+            # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-keep-unchanged
         # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-update-unmodified
         else:
             # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-preserve-user
-            # User customized this marker — skip update
-            merged_parts.append((seg.raw, key))
-            skipped.append(key)
+            # User customized this marker
+            if key in force_keys and new_raw is not None:
+                merged_parts.append((new_raw, key))
+                updated.append(key)
+                updated_details[key] = (seg.raw, new_raw)
+            else:
+                merged_parts.append((seg.raw, key))
+                skipped.append(key)
+                skipped_details[key] = (seg.raw, new_raw)
             # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-preserve-user
     # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-apply-merge
+
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
+    # Detect markers that user deleted (present in old_ref AND new_ref but absent from user).
+    user_keys = {seg.marker_key for seg in user_segments if seg.kind == "marker"}
+    deleted: List[str] = []
+    deleted_details: Dict[str, str] = {}  # key → new_raw
+    for key in new_map:
+        if key not in user_keys and key in old_map:
+            deleted.append(key)
+            deleted_details[key] = new_map[key]
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-respect-deletions
 
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-new
     # Insert markers that are truly new (in new_ref but NOT in old_ref)
     # at their correct position based on new_segments ordering.
-    # Markers that existed in old_ref but were removed by the user stay deleted.
+    # Markers that existed in old_ref but were removed by the user stay deleted
+    # unless they are in restore_keys.
     inserted: List[str] = []
+    restored: List[str] = []
     seen_keys = set(updated) | set(skipped) | set(kept)
     for ni, seg in enumerate(new_segments):
         if seg.kind != "marker":
             continue
-        if seg.marker_key in seen_keys or seg.marker_key in old_map:
+        is_new = seg.marker_key not in old_map and seg.marker_key not in seen_keys
+        is_restore = seg.marker_key in restore_keys and seg.marker_key in deleted_details
+        if not is_new and not is_restore:
+            continue
+        if is_new and seg.marker_key in skip_insert_keys:
+            continue
+        if seg.marker_key in seen_keys:
             continue
 
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-find-anchor
         # Find nearest preceding known marker in new_segments as anchor
         anchor_key = None
         for pi in range(ni - 1, -1, -1):
@@ -860,25 +1197,60 @@ def _three_way_merge_blueprint(
             if prev.kind == "marker" and prev.marker_key in seen_keys:
                 anchor_key = prev.marker_key
                 break
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-find-anchor
 
-        # Find anchor position in merged_parts and insert after it
-        insert_idx = len(merged_parts)
+        insert_idx = len(merged_parts)  # default: append at end
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-after-anchor
         if anchor_key is not None:
             for mi in range(len(merged_parts) - 1, -1, -1):
                 if merged_parts[mi][1] == anchor_key:
                     insert_idx = mi + 1
                     break
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-after-anchor
+        # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-fallback
+        elif anchor_key is None:
+            # No preceding anchor found — search forward for nearest following
+            # known marker in new_segments and insert before it
+            for fi in range(ni + 1, len(new_segments)):
+                fwd = new_segments[fi]
+                if fwd.kind == "marker" and fwd.marker_key in seen_keys:
+                    fwd_key = fwd.marker_key
+                    for mi in range(len(merged_parts)):
+                        if merged_parts[mi][1] == fwd_key:
+                            insert_idx = mi
+                            break
+                    break
+            # If still no match, insert_idx stays at len(merged_parts) — append
+        # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-fallback
 
         merged_parts.insert(insert_idx, (seg.raw, seg.marker_key))
-        inserted.append(seg.marker_key)
+        if is_restore:
+            restored.append(seg.marker_key)
+        else:
+            inserted.append(seg.marker_key)
         seen_keys.add(seg.marker_key)
     # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-insert-new
 
+    # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+    # Upgrade legacy markers to named syntax in the merged output
+    merged_parts, upgraded, upgraded_details = _upgrade_legacy_tags(merged_parts)
+    # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p2:inst-upgrade-legacy
+
     # @cpt-begin:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-return-merge
     merged_text = "".join(part[0] for part in merged_parts)
+    # Remove restored markers from deleted list
+    deleted = [k for k in deleted if k not in restored]
     report = {
-        "updated": updated, "skipped": skipped,
+        "updated": updated, "updated_details": updated_details,
+        "skipped": skipped, "skipped_details": skipped_details,
+        "deleted": deleted, "deleted_details": deleted_details,
+        "restored": restored,
+        "ref_removed": [k for k in ref_removed if k not in remove_keys],
+        "ref_removed_details": ref_removed_details,
+        "removed": [k for k in ref_removed if k in remove_keys],
         "kept": kept, "inserted": inserted,
+        "upgraded": list(dict.fromkeys(list(norm_upgraded_details) + upgraded)),
+        "upgraded_details": {**norm_upgraded_details, **upgraded_details},
     }
     return merged_text, report
     # @cpt-end:cpt-cypilot-algo-blueprint-system-three-way-merge:p1:inst-return-merge
@@ -920,12 +1292,78 @@ def _read_conf_version(conf_path: Path) -> int:
     # @cpt-end:cpt-cypilot-algo-blueprint-system-conf-toml-helpers:p1:inst-read-version
 
 
+def _read_whatsnew(conf_path: Path) -> Dict[int, Dict[str, str]]:
+    """Read [whatsnew] section from conf.toml.
+
+    Returns dict mapping version (int) to {summary, details}.
+    """
+    data = _read_conf_toml(conf_path)
+    raw = data.get("whatsnew", {})
+    result: Dict[int, Dict[str, str]] = {}
+    for key, entry in raw.items():
+        try:
+            ver = int(key)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(entry, dict):
+            result[ver] = {
+                "summary": str(entry.get("summary", "")),
+                "details": str(entry.get("details", "")),
+            }
+    return result
+
+
+def _show_whatsnew(
+    kit_slug: str,
+    ref_whatsnew: Dict[int, Dict[str, str]],
+    user_whatsnew: Dict[int, Dict[str, str]],
+    *,
+    interactive: bool = True,
+) -> bool:
+    """Display whatsnew entries present in ref but missing from user config.
+
+    Compares ref vs user whatsnew keys; shows only entries the user hasn't seen.
+    Returns True if user acknowledged (or non-interactive), False if declined.
+    """
+    missing = sorted(
+        (v, ref_whatsnew[v]) for v in ref_whatsnew
+        if v not in user_whatsnew
+    )
+    if not missing:
+        return True
+
+    sys.stderr.write(f"\n{'=' * 60}\n")
+    sys.stderr.write(f"  What's new in kit '{kit_slug}'\n")
+    sys.stderr.write(f"{'=' * 60}\n")
+
+    for ver, entry in missing:
+        sys.stderr.write(f"\n  \033[1mv{ver}: {entry['summary']}\033[0m\n")
+        if entry["details"]:
+            for line in entry["details"].splitlines():
+                sys.stderr.write(f"    {line}\n")
+
+    sys.stderr.write(f"\n{'=' * 60}\n")
+
+    if not interactive:
+        return True
+
+    sys.stderr.write("  Press Enter to continue with migration (or 'q' to abort): ")
+    sys.stderr.flush()
+    try:
+        response = input().strip().lower()
+    except EOFError:
+        return False
+    return response != "q"
+
+
 def update_kit(
     kit_slug: str,
     source_dir: Path,
     cypilot_dir: Path,
     *,
     dry_run: bool = False,
+    interactive: bool = True,
+    auto_approve: bool = False,
 ) -> Dict[str, Any]:
     """Full update cycle for a single kit.
 
@@ -934,6 +1372,8 @@ def update_kit(
         source_dir: New kit data (e.g. cache/kits/{slug}/ or local dir).
         cypilot_dir: Project adapter directory.
         dry_run: If True, don't write files.
+        interactive: If True, prompt user for confirmation before writing.
+        auto_approve: If True, skip all prompts (equivalent to 'all').
 
     Steps:
         1. Save .prev/ snapshot of current reference
@@ -1004,6 +1444,7 @@ def update_kit(
         # Check version drift and auto-migrate
         mig_result = migrate_kit(
             kit_slug, ref_dir, config_kit_dir,
+            interactive=interactive, auto_approve=auto_approve,
         )
         result["version"] = mig_result
 
@@ -1051,14 +1492,20 @@ def migrate_kit(
     config_kit_dir: Path,
     *,
     dry_run: bool = False,
+    interactive: bool = True,
+    auto_approve: bool = False,
 ) -> Dict[str, Any]:
     """Migrate a single kit's config blueprints using marker-level three-way merge.
 
     Triggered by kit-level version drift (ref version > user version).
     When triggered, merges ALL blueprint .md files from reference into user config:
     - Unchanged markers → updated from new reference
-    - Customized markers → skipped (preserved)
+    - Customized markers → skipped (preserved) unless force-overwritten
     - Deleted markers → NOT re-added
+
+    When interactive=True, prompts user for confirmation before writing each file.
+    Customized markers get a separate warning prompt.
+    auto_approve=True skips all prompts (equivalent to answering 'all').
 
     Also updates config conf.toml.
 
@@ -1076,13 +1523,19 @@ def migrate_kit(
     except (ValueError, TypeError):
         user_kit_ver = 0
 
-    if ref_kit_ver <= user_kit_ver:
-        # Clean up stale .prev/ if left by update_kit (no migration needed)
-        if not dry_run:
-            prev_dir = ref_dir / ".prev"
-            if prev_dir.is_dir():
-                shutil.rmtree(prev_dir)
-        return {"kit": kit_slug, "status": "current"}
+    version_bump = ref_kit_ver > user_kit_ver
+
+    # Show whatsnew before migration starts
+    if version_bump and not dry_run:
+        ref_whatsnew = _read_whatsnew(ref_dir / "conf.toml")
+        user_whatsnew = _read_whatsnew(config_kit_dir / "conf.toml")
+        if ref_whatsnew:
+            ack = _show_whatsnew(
+                kit_slug, ref_whatsnew, user_whatsnew,
+                interactive=interactive and not auto_approve,
+            )
+            if not ack:
+                return {"kit": kit_slug, "status": "aborted"}
 
     # Directories
     ref_bp_dir = ref_dir / "blueprints"
@@ -1091,6 +1544,7 @@ def migrate_kit(
 
     # Merge ALL blueprint .md files from reference
     bp_results: List[Dict[str, Any]] = []
+    apply_state: Dict[str, bool] = {"all": auto_approve}
 
     if ref_bp_dir.is_dir():
         for ref_file in sorted(ref_bp_dir.glob("*.md")):
@@ -1115,15 +1569,14 @@ def migrate_kit(
 
             if old_ref_file.is_file():
                 old_ref_text = old_ref_file.read_text(encoding="utf-8")
-                merged_text, report = _three_way_merge_blueprint(
-                    old_ref_text, new_ref_text, user_text,
-                )
             else:
                 # No .prev/ — conservative: treat new_ref as old_ref so all
                 # user diffs are seen as "customized" and preserved.
-                merged_text, report = _three_way_merge_blueprint(
-                    new_ref_text, new_ref_text, user_text,
-                )
+                old_ref_text = new_ref_text
+
+            merged_text, report = _three_way_merge_blueprint(
+                old_ref_text, new_ref_text, user_text,
+            )
 
             bp_report: Dict[str, Any] = {"blueprint": bp_name}
             if report["updated"]:
@@ -1132,31 +1585,194 @@ def migrate_kit(
                 bp_report["markers_skipped"] = report["skipped"]
             if report.get("inserted"):
                 bp_report["markers_inserted"] = report["inserted"]
+            if report.get("deleted"):
+                bp_report["markers_deleted"] = report["deleted"]
+            if report.get("ref_removed"):
+                bp_report["markers_ref_removed"] = report["ref_removed"]
 
-            if report["updated"] or report.get("inserted"):
+            text_changed = merged_text != user_text
+            has_changes = (
+                report["updated"] or report.get("inserted")
+                or report["skipped"] or report.get("deleted")
+                or report.get("ref_removed")
+                or text_changed
+            )
+
+            if not has_changes:
+                bp_report["action"] = "no_marker_changes"
+                bp_results.append(bp_report)
+                continue
+
+            # ── Interactive: show all diffs, prompt per file ─────────
+            if interactive and not dry_run:
+                upd_details = report.get("updated_details", {})
+                skip_details = report.get("skipped_details", {})
+                n_upd = len(report["updated"])
+                n_ins = len(report.get("inserted", []))
+                n_skip = len(report["skipped"])
+                n_del = len(report.get("deleted", []))
+                n_rem = len(report.get("ref_removed", []))
+                syntax_only = (
+                    text_changed
+                    and not n_upd and not n_ins
+                    and not n_skip and not n_del and not n_rem
+                )
+
+                # Syntax-only upgrade: auto-apply, just log
+                if syntax_only:
+                    sys.stderr.write(f"\n  [{kit_slug}] {bp_name}: syntax upgrade\n")
+                    upg_details = report.get("upgraded_details", {})
+                    for k in report.get("upgraded", []):
+                        if k in upg_details:
+                            old_tag, new_tag = upg_details[k]
+                            sys.stderr.write(f"      {old_tag} → {new_tag}\n")
+                    bp_report["action"] = "merged"
+                    bp_report["markers_upgraded"] = True
+                    user_bp_dir.mkdir(parents=True, exist_ok=True)
+                    user_file.write_text(merged_text, encoding="utf-8")
+                    bp_results.append(bp_report)
+                    continue
+
+                # Content changes: prompt per marker
+                sys.stderr.write(f"\n  [{kit_slug}] {bp_name}:\n")
+
+                upg_details = report.get("upgraded_details", {})
+                if report.get("upgraded"):
+                    sys.stderr.write("    syntax upgrade (legacy → named markers):\n")
+                    for k in report["upgraded"]:
+                        if k in upg_details:
+                            old_tag, new_tag = upg_details[k]
+                            sys.stderr.write(f"      {old_tag} → {new_tag}\n")
+
+                # Build inserted content map
+                ins_map: Dict[str, str] = {}
+                for seg in _parse_segments(new_ref_text):
+                    if seg.kind == "marker" and seg.marker_key in set(report.get("inserted", [])):
+                        ins_map[seg.marker_key] = seg.raw
+
+                # Per-marker prompts: collect decisions
+                declined_update: List[str] = []
+                declined_insert: List[str] = []
+                accepted_force: List[str] = []
+                accepted_restore: List[str] = []
+                accepted_remove: List[str] = []
+
+                for k in report["updated"]:
+                    sys.stderr.write(f"    ✎ {k} — updated from reference\n")
+                    if k in upd_details:
+                        _show_marker_diff(k, *upd_details[k])
+                    if _prompt_confirm("    apply?", apply_state) == "n":
+                        declined_update.append(k)
+
+                for k in report.get("inserted", []):
+                    sys.stderr.write(f"    + {k} — new marker\n")
+                    if k in ins_map:
+                        _show_marker_content(ins_map[k], color="green")
+                    if _prompt_confirm("    insert?", apply_state) == "n":
+                        declined_insert.append(k)
+
+                for k in report["skipped"]:
+                    sys.stderr.write(f"    ≡ {k} — customized by you\n")
+                    if k in skip_details:
+                        _show_marker_diff(k, *skip_details[k])
+                    if _prompt_confirm("    overwrite?", apply_state) == "y":
+                        accepted_force.append(k)
+
+                del_details = report.get("deleted_details", {})
+                for k in report.get("deleted", []):
+                    sys.stderr.write(f"    ✗ {k} — deleted by you (exists in reference)\n")
+                    if k in del_details:
+                        _show_marker_content(del_details[k], color="red")
+                    if _prompt_confirm("    restore?", apply_state) == "y":
+                        accepted_restore.append(k)
+
+                ref_rem_details = report.get("ref_removed_details", {})
+                for k in report.get("ref_removed", []):
+                    sys.stderr.write(f"    − {k} — removed from reference (will be deleted from config)\n")
+                    if k in ref_rem_details:
+                        _show_marker_content(ref_rem_details[k], color="red")
+                    if _prompt_confirm("    remove?", apply_state) == "y":
+                        accepted_remove.append(k)
+
+                # Re-merge with per-marker decisions
+                merged_text, report = _three_way_merge_blueprint(
+                    old_ref_text, new_ref_text, user_text,
+                    force_keys=frozenset(accepted_force),
+                    restore_keys=frozenset(accepted_restore),
+                    remove_keys=frozenset(accepted_remove),
+                    skip_keys=frozenset(declined_update),
+                    skip_insert_keys=frozenset(declined_insert),
+                )
+
+                if merged_text == user_text:
+                    bp_report["action"] = "declined"
+                    bp_results.append(bp_report)
+                    continue
+
+                # Rebuild bp_report from final merge
+                bp_report = {"blueprint": bp_name}
+                if report["updated"]:
+                    bp_report["markers_updated"] = report["updated"]
+                if report["skipped"]:
+                    bp_report["markers_skipped"] = report["skipped"]
+                if report.get("inserted"):
+                    bp_report["markers_inserted"] = report["inserted"]
+                if report.get("restored"):
+                    bp_report["markers_restored"] = report["restored"]
+                if accepted_force:
+                    bp_report["markers_forced"] = accepted_force
+                if declined_update:
+                    bp_report["markers_declined"] = declined_update
+                if declined_insert:
+                    bp_report["markers_insert_declined"] = declined_insert
+
                 bp_report["action"] = "merged"
+                if not report["updated"] and not report.get("inserted"):
+                    bp_report["markers_upgraded"] = True
+                user_bp_dir.mkdir(parents=True, exist_ok=True)
+                user_file.write_text(merged_text, encoding="utf-8")
+
+            else:
+                # Non-interactive / dry-run path
+                bp_report["action"] = "merged"
+                if text_changed and not report["updated"] and not report.get("inserted"):
+                    bp_report["markers_upgraded"] = True
                 if not dry_run:
                     user_bp_dir.mkdir(parents=True, exist_ok=True)
                     user_file.write_text(merged_text, encoding="utf-8")
-            elif report["skipped"]:
-                bp_report["action"] = "skipped_all_customized"
-            else:
-                bp_report["action"] = "no_marker_changes"
 
             bp_results.append(bp_report)
 
+    # Check if any changes were actually applied
+    has_applied_changes = any(
+        r.get("action") in ("merged", "created")
+        for r in bp_results
+    )
+    all_declined = bp_results and not has_applied_changes and any(
+        r.get("action") == "declined" for r in bp_results
+    )
+
+    if not has_applied_changes and not version_bump:
+        # No applied changes and no version bump — clean up .prev/ and return current
+        if not dry_run:
+            prev_dir = ref_dir / ".prev"
+            if prev_dir.is_dir():
+                shutil.rmtree(prev_dir)
+        return {"kit": kit_slug, "status": "current"}
+
     kit_ver_label = f"v{user_kit_ver} → v{ref_kit_ver}"
 
-    # Update config conf.toml to match reference
-    if not dry_run:
+    # Update config conf.toml only on version bump with real applied changes;
+    # don't bump version if user declined all changes (re-prompt on next update)
+    if version_bump and not dry_run and not all_declined:
         ref_conf_file = ref_dir / "conf.toml"
         user_conf_file = config_kit_dir / "conf.toml"
         if ref_conf_file.is_file():
             config_kit_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ref_conf_file, user_conf_file)
 
-    # Clean up .prev/ after successful migration
-    if not dry_run:
+    # Clean up .prev/ after successful migration (keep if all declined — needed for retry)
+    if not dry_run and not all_declined:
         prev_dir = ref_dir / ".prev"
         if prev_dir.is_dir():
             shutil.rmtree(prev_dir)
@@ -1188,6 +1804,10 @@ def cmd_kit_migrate(argv: List[str]) -> int:
     )
     p.add_argument("--kit", default=None, help="Kit slug to migrate (default: all)")
     p.add_argument("--dry-run", action="store_true", help="Show what would be done")
+    p.add_argument("--no-interactive", action="store_true",
+                   help="Disable interactive prompts (auto-skip customized markers)")
+    p.add_argument("-y", "--yes", action="store_true",
+                   help="Auto-approve all prompts (no interaction)")
     args = p.parse_args(argv)
     # @cpt-end:cpt-cypilot-flow-blueprint-system-kit-migrate:p1:inst-user-migrate
 
@@ -1228,9 +1848,12 @@ def cmd_kit_migrate(argv: List[str]) -> int:
     for kit_dir in kit_dirs:
         kit_slug = kit_dir.name
         config_kit_dir = config_dir / "kits" / kit_slug
+        interactive = not args.no_interactive and sys.stdin.isatty()
         result = migrate_kit(
             kit_slug, kit_dir, config_kit_dir,
             dry_run=args.dry_run,
+            interactive=interactive,
+            auto_approve=args.yes,
         )
         # Regenerate .gen/ after successful migration
         if result["status"] == "migrated" and not args.dry_run:
@@ -1258,13 +1881,16 @@ def cmd_kit_migrate(argv: List[str]) -> int:
 
     # @cpt-begin:cpt-cypilot-flow-blueprint-system-kit-migrate:p1:inst-return-migrate-ok
     migrated_count = sum(1 for r in results if r["status"] == "migrated")
+    aborted_count = sum(1 for r in results if r["status"] == "aborted")
     has_failures = any(r["status"] == "FAIL" for r in results)
     output: Dict[str, Any] = {
-        "status": "FAIL" if has_failures else "PASS",
+        "status": "FAIL" if has_failures else ("ABORTED" if aborted_count and not migrated_count else "PASS"),
         "kits_migrated": migrated_count,
-        "kits_current": len(results) - migrated_count,
+        "kits_current": len(results) - migrated_count - aborted_count,
         "results": results,
     }
+    if aborted_count:
+        output["kits_aborted"] = aborted_count
     if args.dry_run:
         output["dry_run"] = True
 
