@@ -1907,11 +1907,10 @@ class TestCLIPyCoverageTopLevelHelp(unittest.TestCase):
         with redirect_stdout(stdout):
             exit_code = main(["--help"])
         self.assertEqual(exit_code, 0)
-        output = stdout.getvalue()
-        self.assertIn("usage: cypilot <command>", output)
-        self.assertIn("Validation commands:", output)
-        self.assertIn("Search and utility commands:", output)
-        self.assertIn("validate", output)
+        out = json.loads(stdout.getvalue())
+        self.assertIn("cypilot", out["usage"])
+        self.assertIn("validate", out["commands"])
+        self.assertIn("Validation", out["sections"])
 
     def test_top_level_help_short_flag(self):
         """cypilot -h also shows usage."""
@@ -1921,8 +1920,8 @@ class TestCLIPyCoverageTopLevelHelp(unittest.TestCase):
         with redirect_stdout(stdout):
             exit_code = main(["-h"])
         self.assertEqual(exit_code, 0)
-        output = stdout.getvalue()
-        self.assertIn("usage: cypilot <command>", output)
+        out = json.loads(stdout.getvalue())
+        self.assertIn("cypilot", out["usage"])
 
 
 class TestCLIPyCoverageSlugValidation(unittest.TestCase):
@@ -2001,7 +2000,7 @@ class TestCLIPyCoverageAgentsCommand(unittest.TestCase):
                 os.chdir(root)
                 stdout = io.StringIO()
                 with redirect_stdout(stdout):
-                    exit_code = main(["agents", "--agent", "windsurf", "--dry-run"])
+                    exit_code = main(["generate-agents", "--agent", "windsurf", "--dry-run"])
                 self.assertEqual(exit_code, 0)
                 out = json.loads(stdout.getvalue())
                 self.assertIn(out.get("status"), ["OK", "PASS"])

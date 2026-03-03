@@ -109,11 +109,11 @@ test-coverage: check-pytest-cov
 vulture: check-vulture
 	@echo "Running vulture dead-code scan (excluding tests by scanning only skills/cypilot/scripts/cypilot)..."
 	@echo "Tip: raise/lower VULTURE_MIN_CONF to reduce false positives (current: $(VULTURE_MIN_CONF))."
-	@$(VULTURE_PIPX) skills/cypilot/scripts/cypilot --min-confidence $(VULTURE_MIN_CONF) || true
+	@$(VULTURE_PIPX) skills/cypilot/scripts/cypilot vulture_whitelist.py --min-confidence $(VULTURE_MIN_CONF) || true
 
 vulture-ci: check-vulture
 	@echo "Running vulture dead-code scan (CI mode, fails if findings)..."
-	$(VULTURE_PIPX) skills/cypilot/scripts/cypilot --min-confidence $(VULTURE_MIN_CONF)
+	$(VULTURE_PIPX) skills/cypilot/scripts/cypilot vulture_whitelist.py --min-confidence $(VULTURE_MIN_CONF)
 
 # Check version consistency
 check-versions:
@@ -125,31 +125,7 @@ update:
 
 # Validate core methodology spec
 validate:
-	$(CPT) validate
-
-validate-code:
-	$(CPT) validate-code
-
-# Validate specific feature
-validate-feature:
-	@if [ -z "$(FEATURE)" ]; then \
-		echo "Error: FEATURE parameter required"; \
-		echo "Usage: make validate-feature FEATURE=feature-name"; \
-		exit 1; \
-	fi
-	@echo "Validating feature: $(FEATURE)..."
-	@$(CPT) validate \
-		--artifact architecture/features/$(FEATURE)/DESIGN.md
-
-# Validate code traceability for specific feature
-validate-code-feature:
-	@if [ -z "$(FEATURE)" ]; then \
-		echo "Error: FEATURE parameter required"; \
-		echo "Usage: make validate-code-feature FEATURE=feature-name"; \
-		exit 1; \
-	fi
-	@echo "Validating code traceability for feature: $(FEATURE)..."
-	@$(CPT) validate --artifact architecture/features/$(FEATURE)
+	$(CPT) validate --json
 
 # Validate SDLC examples against templates
 self-check:
