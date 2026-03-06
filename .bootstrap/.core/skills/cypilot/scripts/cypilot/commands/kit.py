@@ -1641,7 +1641,8 @@ def _read_blueprint_hashes(source_dir: Path, version: str) -> Dict[str, str]:
         if isinstance(ver_data, dict):
             return {str(k): str(v) for k, v in ver_data.items() if isinstance(v, str)}
         return {}
-    except Exception:
+    except Exception as exc:
+        sys.stderr.write(f"kit: warning: cannot read hashes from {hash_path}: {exc}\n")
         return {}
     # @cpt-end:cpt-cypilot-algo-blueprint-system-hash-detection:p1:inst-read-hashes
 
@@ -1660,8 +1661,8 @@ def _write_blueprint_hashes(source_dir: Path, version: str, hashes: Dict[str, st
     if hash_path.is_file():
         try:
             existing = toml_utils.load(hash_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            sys.stderr.write(f"kit: warning: cannot read existing hashes from {hash_path}: {exc}\n")
     existing[str(version)] = hashes
     toml_utils.dump(
         existing, hash_path,
@@ -1772,28 +1773,25 @@ def _detect_and_migrate_layout(
             config_dir = cypilot_dir / "config"
             core_toml = config_dir / "core.toml"
             if core_toml.is_file():
-                try:
-                    import tomllib
-                    with open(core_toml, "rb") as f:
-                        data = tomllib.load(f)
-                    kits_conf = data.get("kits", {})
-                    updated = False
-                    # Kit ID (e.g. 'cypilot-sdlc') may differ from dir slug (e.g. 'sdlc'),
-                    # so match by old path pattern instead of key lookup.
-                    old_gen_path = f".gen/kits/{slug}"
-                    for kit_id, kit_entry in kits_conf.items():
-                        if isinstance(kit_entry, dict) and kit_entry.get("path") == old_gen_path:
-                            kit_entry["path"] = f"config/kits/{slug}"
-                            updated = True
-                    # Also check direct slug match (covers case where key == slug)
-                    if not updated and slug in kits_conf:
-                        kits_conf[slug]["path"] = f"config/kits/{slug}"
+                import tomllib
+                with open(core_toml, "rb") as f:
+                    data = tomllib.load(f)
+                kits_conf = data.get("kits", {})
+                updated = False
+                # Kit ID (e.g. 'cypilot-sdlc') may differ from dir slug (e.g. 'sdlc'),
+                # so match by old path pattern instead of key lookup.
+                old_gen_path = f".gen/kits/{slug}"
+                for kit_id, kit_entry in kits_conf.items():
+                    if isinstance(kit_entry, dict) and kit_entry.get("path") == old_gen_path:
+                        kit_entry["path"] = f"config/kits/{slug}"
                         updated = True
-                    if updated:
-                        from ..utils import toml_utils
-                        toml_utils.dump(data, core_toml, header_comment="Cypilot project configuration")
-                except Exception:
-                    pass
+                # Also check direct slug match (covers case where key == slug)
+                if not updated and slug in kits_conf:
+                    kits_conf[slug]["path"] = f"config/kits/{slug}"
+                    updated = True
+                if updated:
+                    from ..utils import toml_utils
+                    toml_utils.dump(data, core_toml, header_comment="Cypilot project configuration")
             # @cpt-end:cpt-cypilot-algo-version-config-layout-restructure:p1:inst-layout-update-core
 
             migrated[slug] = "migrated"
@@ -1826,9 +1824,17 @@ def _detect_and_migrate_layout(
     if gen_kits.is_dir() and not any(gen_kits.iterdir()):
         gen_kits.rmdir()
 
-    # Clean up backup
+    # Clean up backups for successful migrations only; preserve failed ones
     if backup_dir.is_dir():
-        shutil.rmtree(backup_dir, ignore_errors=True)
+        for slug, status in migrated.items():
+            kit_backup = backup_dir / slug
+            if status == "migrated" and kit_backup.is_dir():
+                shutil.rmtree(kit_backup, ignore_errors=True)
+        # Remove backup_dir only if empty (failed kit backups remain)
+        try:
+            backup_dir.rmdir()
+        except OSError:
+            pass
 
     return migrated
 
@@ -2526,8 +2532,8 @@ def _read_kit_version(conf_path: Path) -> str:
         ver = data.get("version")
         if ver is not None:
             return str(ver)
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"kit: warning: cannot read version from {conf_path}: {exc}\n")
     return ""
 
 def _register_kit_in_core_toml(
@@ -2560,5 +2566,5 @@ def _register_kit_in_core_toml(
     try:
         from ..utils import toml_utils
         toml_utils.dump(data, core_toml, header_comment="Cypilot project configuration")
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"kit: warning: failed to register {kit_slug} in {core_toml}: {exc}\n")

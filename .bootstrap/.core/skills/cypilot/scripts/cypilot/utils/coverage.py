@@ -57,10 +57,24 @@ class CoverageReport:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _is_blank_or_comment(line: str, ext: str) -> bool:
-    """Check if a line is blank or a comment for the given file extension."""
+def _is_blank_or_comment(line: str, ext: str, state: Optional[Dict[str, Any]] = None) -> bool:
+    """Check if a line is blank or a comment for the given file extension.
+
+    When *state* is provided it must be a dict (e.g. ``{"in_block": False,
+    "end_marker": ""}``).  The function uses it to track whether the current
+    line is inside a multi-line comment block so that continuation lines are
+    correctly classified as comments.
+    """
     stripped = line.strip()
     if not stripped:
+        return True
+
+    # Inside a multi-line comment block? (stateful tracking)
+    if state is not None and state.get("in_block"):
+        end_marker = state["end_marker"]
+        if end_marker in stripped:
+            state["in_block"] = False
+            state["end_marker"] = ""
         return True
 
     comment_info = EXTENSION_COMMENT_DEFAULTS.get(ext)
@@ -79,6 +93,11 @@ def _is_blank_or_comment(line: str, ext: str) -> bool:
 
     for mlc in multi_line:
         if stripped.startswith(mlc["start"]):
+            # Check if block closes on same line
+            rest = stripped[len(mlc["start"]):]
+            if mlc["end"] not in rest and state is not None:
+                state["in_block"] = True
+                state["end_marker"] = mlc["end"]
             return True
 
     return False
@@ -104,9 +123,10 @@ def scan_file_coverage(path: Path) -> Optional[FileCoverage]:
     # @cpt-begin:cpt-cypilot-algo-spec-coverage-scan:p1:inst-scan-count-lines
     effective_lines = 0
     effective_line_set: Set[int] = set()
+    comment_state: Dict[str, Any] = {"in_block": False, "end_marker": ""}
     for idx, line in enumerate(lines):
         line_no = idx + 1
-        if not _is_blank_or_comment(line, ext):
+        if not _is_blank_or_comment(line, ext, comment_state):
             effective_lines += 1
             effective_line_set.add(line_no)
     # @cpt-end:cpt-cypilot-algo-spec-coverage-scan:p1:inst-scan-count-lines

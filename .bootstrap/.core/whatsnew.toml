@@ -70,13 +70,20 @@ details = """\
 """
 
 ["v3.0.9-beta"]
-summary = "Spec coverage, self-check fixes, and full CDSL traceability"
+summary = "Layout restructure, hash-based updates, CI pipeline, spec coverage"
 details = """\
+- **Directory layout restructure**: generated kit outputs moved from `.gen/kits/{slug}/` → `config/kits/{slug}/`; user blueprints moved to `kits/{slug}/blueprints/`; `.prev/` directory removed
+- **Hash-based blueprint customization detection**: SHA-256 hashes in `blueprint_hashes.toml` replace `.prev/` snapshots; per-version hash registry lives in kit source only
+- **Auto layout migration**: `cpt update` detects old layout and migrates automatically
+- **Resource diff engine** (`utils/diff_engine.py`): file-level diffs for regenerated resources with accept/reject/modify modes
+- **Self-check integrated into `cpt update`**: runs automatically after kit update, reports PASS/WARN
+- **GitHub Actions CI pipeline**: 6 parallel jobs (test, coverage, vulture, versions, spec-coverage, validate)
+- **Local CI via act**: `make ci` runs the same workflow in Docker; auto-detects arm64/amd64; sequential fail-fast
+- **`make spec-coverage`** and **`make lint-ci`** targets added
 - New `spec-coverage` command with `--system`, `--min-coverage`, `--min-file-coverage`, `--json`
 - Added `@cpt-begin`/`@cpt-end` wrapping blocks to all 42 source files (97.7% spec coverage)
 - `--min-file-coverage` skips files with 0 effective lines (empty __init__.py)
 - TOC `--max-level` default changed from 6 to 3 in `toc` and `validate-toc` commands
-- Regenerated TOCs in architecture specs to match max-level 3
-- Added `Validate Kits` algo definition to blueprint-system FEATURE spec
 - All 8 artifact templates and examples now pass self-check
+- `config/AGENTS.md` loading changed from `WHEN it exists` → `FIRST`\
 """
