@@ -1,4 +1,4 @@
-# Feature: Blueprint System
+# Feature: Kit Management
 
 <!-- toc -->
 
@@ -10,16 +10,16 @@
 - [2. Actor Flows (CDSL)](#2-actor-flows-cdsl)
   - [Kit Installation](#kit-installation)
   - [Kit Update](#kit-update)
-  - [Kit Migrate](#kit-migrate)
-  - [Resource Generation](#resource-generation)
+  - [Kit Migrate (LEGACY)](#kit-migrate-legacy)
+  - [Resource Generation (LEGACY)](#resource-generation-legacy)
   - [Kit Structural Validation](#kit-structural-validation)
 - [3. Processes / Business Logic (CDSL)](#3-processes-business-logic-cdsl)
-  - [Parse Blueprint](#parse-blueprint)
-  - [Process Kit](#process-kit)
-  - [Generate Per-Artifact Outputs](#generate-per-artifact-outputs)
-  - [Generate Kit-Wide Constraints](#generate-kit-wide-constraints)
+  - [Parse Blueprint (LEGACY)](#parse-blueprint-legacy)
+  - [Process Kit (LEGACY)](#process-kit-legacy)
+  - [Generate Per-Artifact Outputs (LEGACY)](#generate-per-artifact-outputs-legacy)
+  - [Generate Kit-Wide Constraints (LEGACY)](#generate-kit-wide-constraints-legacy)
   - [Validate Kits](#validate-kits)
-  - [Three-Way Merge](#three-way-merge)
+  - [Three-Way Merge (LEGACY)](#three-way-merge-legacy)
   - [Seed Kit Config Files](#seed-kit-config-files)
   - [Resolve Cypilot Directory](#resolve-cypilot-directory)
   - [Write Kit Gen Outputs](#write-kit-gen-outputs)
@@ -27,24 +27,26 @@
   - [Collect SKILL Extensions](#collect-skill-extensions)
   - [Generate Workflows](#generate-workflows)
   - [Resource Diff Engine](#resource-diff-engine)
-  - [Blueprint Hash Detection](#blueprint-hash-detection)
+  - [File-Level Kit Update](#file-level-kit-update)
+  - [Interactive File Diff](#interactive-file-diff)
+  - [Blueprint Hash Detection (LEGACY)](#blueprint-hash-detection-legacy)
 - [4. States (CDSL)](#4-states-cdsl)
   - [Kit Installation State](#kit-installation-state)
 - [5. Definitions of Done](#5-definitions-of-done)
-  - [Blueprint Parsing](#blueprint-parsing)
-  - [Per-Artifact Resource Generation](#per-artifact-resource-generation)
-  - [Kit-Wide Constraints Generation](#kit-wide-constraints-generation)
+  - [Blueprint Parsing (LEGACY)](#blueprint-parsing-legacy)
+  - [Per-Artifact Resource Generation (LEGACY)](#per-artifact-resource-generation-legacy)
+  - [Kit-Wide Constraints Generation (LEGACY)](#kit-wide-constraints-generation-legacy)
   - [Kit Installation and Registration](#kit-installation-and-registration)
   - [Kit Update](#kit-update-1)
-  - [Kit Migrate](#kit-migrate-1)
+  - [Kit Migrate (LEGACY)](#kit-migrate-legacy-1)
   - [Kit Structural Validation](#kit-structural-validation-1)
-  - [Resource Regeneration](#resource-regeneration)
+  - [Resource Regeneration (LEGACY)](#resource-regeneration-legacy)
 - [6. Implementation Modules](#6-implementation-modules)
 - [7. Acceptance Criteria](#7-acceptance-criteria)
 
 <!-- /toc -->
 
-- [x] `p1` - **ID**: `cpt-cypilot-featstatus-blueprint-system`
+- [ ] `p1` - **ID**: `cpt-cypilot-featstatus-blueprint-system`
 
 ## 1. Feature Context
 
@@ -52,23 +54,25 @@
 
 ### 1. Overview
 
-Single-source-of-truth blueprint files that define artifact kinds and generate all kit resources. Each blueprint is a Markdown file enriched with `@cpt:` markers from which the Blueprint Processor deterministically produces templates, rules, checklists, examples, constraints, and workflows. The Kit Manager handles kit lifecycle — installation, registration, update, and structural validation.
+Kit Management provides the lifecycle for Cypilot kits — installation, file-level update with interactive diff, and structural validation. A kit is a set of files (rules, workflows, scripts, templates, checklists, examples, constraints) that ship as-is — no generation step. During updates, the system shows a unified diff for each changed file and the user accepts, declines, or modifies changes individually.
+
+Blueprint processing logic (parsing `@cpt:` markers, generating resources from blueprints) is preserved solely for **backward compatibility** when migrating installations from v2/early-v3 that used the blueprint system.
 
 ### 2. Purpose
 
-Eliminates resource duplication across kit artifacts. Without blueprints, every artifact kind requires separate manually-maintained files (template, rules, checklist, constraints) that duplicate structural knowledge and drift apart over time. Addresses PRD requirements for an extensible kit system (`cpt-cypilot-fr-core-kits`) and a core blueprint contract (`cpt-cypilot-fr-core-blueprint`).
+Provides a simple, predictable kit lifecycle. The file-level diff approach eliminates the complexity of blueprint parsing, marker-based merge, and hash-based detection — replacing it with a straightforward "show what changed, let the user decide" model. Kit authors maintain the final files directly (rules, templates, checklists), and users receive diffs on every update. Addresses PRD requirements for an extensible kit system (`cpt-cypilot-fr-core-kits`).
 
 ### 3. Actors
 
 | Actor | Role in Feature |
 |-------|-----------------|
-| `cpt-cypilot-actor-user` | Installs kits, customizes blueprints, triggers resource generation and kit updates |
-| `cpt-cypilot-actor-cypilot-cli` | Executes blueprint processing, kit management commands, and structural validation |
+| `cpt-cypilot-actor-user` | Installs kits, customizes kit files, triggers kit updates |
+| `cpt-cypilot-actor-cypilot-cli` | Executes kit management commands (install, update, validate) and file-level diff |
 
 ### 4. References
 
-- **PRD**: [PRD.md](../PRD.md) — `cpt-cypilot-fr-core-blueprint`, `cpt-cypilot-fr-core-kits`
-- **Design**: [DESIGN.md](../DESIGN.md) — `cpt-cypilot-component-blueprint-processor`, `cpt-cypilot-component-kit-manager`
+- **PRD**: [PRD.md](../PRD.md) — `cpt-cypilot-fr-core-kits`
+- **Design**: [DESIGN.md](../DESIGN.md) — `cpt-cypilot-component-kit-manager`
 - **Dependencies**: `cpt-cypilot-feature-core-infra`
 
 ## 2. Actor Flows (CDSL)
@@ -80,59 +84,59 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 **Actor**: `cpt-cypilot-actor-user`
 
 **Success Scenarios**:
-- User installs a kit from a local path → blueprints copied to `{cypilot_path}/kits/{slug}/blueprints/` (user-editable), SHA-256 hashes computed, all resources generated into kit config directory, kit registered in `{cypilot_path}/config/core.toml`
+- User installs a kit from a local path → kit files copied to `{cypilot_path}/config/kits/{slug}/`, `conf.toml` copied to `{cypilot_path}/kits/{slug}/conf.toml`, kit registered in `{cypilot_path}/config/core.toml`
 - User installs a kit during `cpt init` → same as above, triggered automatically for bundled kits
 
 **Error Scenarios**:
-- Kit path does not contain a `blueprints/` directory → error with structural requirements
-- Blueprint file has invalid marker syntax → error listing malformed markers with line numbers
+- Kit source path does not contain a valid kit structure → error with structural requirements
 - Kit slug already registered and `--force` not provided → error with hint to use `--force`
 
 **Steps**:
 1. [x] - `p1` - User invokes `cypilot kit install <path> [--force]` - `inst-user-install`
-2. [x] - `p1` - Validate kit source: verify `blueprints/` directory exists with at least one `.md` file - `inst-validate-source`
+2. [x] - `p1` - Validate kit source: verify `conf.toml` exists with `slug` and `version` fields - `inst-validate-source`
 3. [x] - `p1` - **IF** validation fails **RETURN** error with structural requirements - `inst-if-invalid-source`
-4. [x] - `p1` - Extract kit metadata: read `@cpt:blueprint` marker from first blueprint to get kit slug and version - `inst-extract-metadata`
+4. [x] - `p1` - Extract kit metadata: read `slug` and `version` from `conf.toml` - `inst-extract-metadata`
 5. [x] - `p1` - **IF** kit slug already registered AND `--force` not set **RETURN** error with hint - `inst-if-already-registered`
-6. [x] - `p1` - Ask user for config output directory (default: `{cypilot_path}/config/kits/{slug}/`) - `inst-ask-config-dir`
-7. [x] - `p1` - Copy blueprints to `{cypilot_path}/kits/{slug}/blueprints/` (user-editable) - `inst-copy-blueprints`
-8. [x] - `p1` - Copy `conf.toml` to `{cypilot_path}/kits/{slug}/conf.toml` (version metadata only; `blueprint_hashes.toml` stays in source, not installed) - `inst-copy-conf`
-9. [x] - `p1` - Process all blueprints using `cpt-cypilot-algo-blueprint-system-process-kit`, generate outputs into kit config directory - `inst-process-blueprints`
-10. [x] - `p1` - Register kit in `{cypilot_path}/config/core.toml` with slug, config output path, and artifact templates - `inst-register-kit`
-11. [x] - `p1` - **RETURN** installation summary (kit slug, generated files count, registered artifact kinds) - `inst-return-install-ok`
+6. [x] - `p1` - Copy all kit files (artifacts/, codebase/, workflows/, scripts/, constraints.toml, SKILL.md) to `{cypilot_path}/config/kits/{slug}/` - `inst-copy-kit-files`
+7. [x] - `p1` - Copy `conf.toml` to `{cypilot_path}/kits/{slug}/conf.toml` (version metadata) - `inst-copy-conf`
+8. [x] - `p1` - Register kit in `{cypilot_path}/config/core.toml` with slug and config output path - `inst-register-kit`
+9. [x] - `p1` - Seed default config files from kit scripts into `{cypilot_path}/config/` using `cpt-cypilot-algo-blueprint-system-seed-configs` - `inst-seed-configs`
+10. [x] - `p1` - Regenerate `.gen/AGENTS.md` and `.gen/SKILL.md` to include the new kit's navigation and skill routing - `inst-regen-gen`
+11. [x] - `p1` - **RETURN** installation summary (kit slug, files installed, registered artifact kinds) - `inst-return-install-ok`
 
 ### Kit Update
 
-- [x] `p1` - **ID**: `cpt-cypilot-flow-blueprint-system-kit-update`
+- [ ] `p1` - **ID**: `cpt-cypilot-flow-blueprint-system-kit-update`
 
 **Actor**: `cpt-cypilot-actor-user`
 
 **Success Scenarios**:
-- User runs `cypilot kit update --force` → all user blueprints overwritten, outputs regenerated
-- User runs `cypilot kit update` (smart mode) → hash-based detection preserves user customizations, unmodified blueprints auto-update, customized blueprints trigger interactive diff
+- User runs `cypilot kit update --force` → all kit files overwritten from source, no prompts
+- User runs `cypilot kit update` (interactive mode) → file-level diff shown for each changed file; user accepts, declines, or modifies per file
 
 **Error Scenarios**:
 - No kits installed → error with hint to install first
-- Interactive diff resolution fails → error with details and hint to use `--force`
+- File write fails → error with details
 
 **Steps**:
-1. [x] - `p1` - User invokes `cypilot kit update [--force] [--kit SLUG]` - `inst-user-update`
-2. [x] - `p1` - Resolve target kits: if `--kit` specified use that, otherwise update all installed kits - `inst-resolve-kits`
-3. [x] - `p1` - **FOR EACH** kit in target kits - `inst-foreach-kit`
-   1. [x] - `p1` - Load new kit source from cache - `inst-load-new-source`
-   2. [x] - `p1` - **IF** `--force` - `inst-if-force`
-      1. [x] - `p1` - Overwrite user blueprints in `{cypilot_path}/kits/{slug}/blueprints/` with new source - `inst-force-overwrite`
-   3. [x] - `p1` - **ELSE** apply hash-based customization detection per blueprint file - `inst-else-smart`
-      1. [x] - `p1` - Compute SHA-256 of each user blueprint, compare against known hashes for user's installed version from source `blueprint_hashes.toml` (keyed by version) - `inst-compare-hashes`
-      2. [x] - `p1` - **IF** hash matches known default → auto-update blueprint silently - `inst-auto-update`
-      3. [x] - `p1` - **ELSE** (customized) → delegate to Resource Diff Engine for interactive diff - `inst-interactive-diff`
-   4. [x] - `p1` - Regenerate all outputs using `cpt-cypilot-algo-blueprint-system-process-kit` with interactive diff for user-modified resources - `inst-regenerate`
-   5. [x] - `p1` - Update kit version in `{cypilot_path}/kits/{slug}/conf.toml` - `inst-update-version`
-4. [x] - `p1` - **RETURN** update summary (kits updated, files regenerated, diffs resolved) - `inst-return-update-ok`
+1. [ ] - `p1` - User invokes `cypilot kit update [--force] [--kit SLUG]` - `inst-user-update`
+2. [ ] - `p1` - Resolve target kits: if `--kit` specified use that, otherwise update all installed kits - `inst-resolve-kits`
+3. [ ] - `p1` - **FOR EACH** kit in target kits - `inst-foreach-kit`
+   1. [ ] - `p1` - Load new kit source from cache - `inst-load-new-source`
+   2. [ ] - `p1` - **IF** `--force` - `inst-if-force`
+      1. [ ] - `p1` - Overwrite all kit files in `{cypilot_path}/config/kits/{slug}/` with source files - `inst-force-overwrite`
+   3. [ ] - `p1` - **ELSE** apply file-level diff using `cpt-cypilot-algo-kit-file-update` - `inst-else-interactive`
+      1. [ ] - `p1` - Compare each source file against user's installed version - `inst-compare-files`
+      2. [ ] - `p1` - **FOR EACH** changed file: show unified diff and prompt via `cpt-cypilot-algo-kit-interactive-diff` - `inst-show-diff`
+   4. [ ] - `p1` - Update kit version in `{cypilot_path}/kits/{slug}/conf.toml` - `inst-update-version`
+4. [ ] - `p1` - Regenerate `.gen/AGENTS.md` and `.gen/SKILL.md` from all installed kits - `inst-regen-gen`
+5. [ ] - `p1` - **RETURN** update summary (kits updated, files accepted/declined/modified) - `inst-return-update-ok`
 
-### Kit Migrate
+### Kit Migrate (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-flow-blueprint-system-kit-migrate`
+
+> **LEGACY**: This flow is preserved for backward compatibility only — it handles migrations from v2/early-v3 installations that used the blueprint system. New kit updates use file-level diff (`cpt-cypilot-flow-blueprint-system-kit-update`).
 
 **Actor**: `cpt-cypilot-actor-user`
 
@@ -151,9 +155,11 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 4. [x] - `p1` - Update kit version in `{cypilot_path}/kits/{slug}/conf.toml` - `inst-update-version`
 5. [x] - `p1` - **RETURN** migration summary (kits migrated, blueprints merged, diffs resolved) - `inst-return-migrate-ok`
 
-### Resource Generation
+### Resource Generation (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-flow-blueprint-system-generate-resources`
+
+> **LEGACY**: This flow is preserved for backward compatibility only — it regenerates kit outputs from blueprint files. New kits ship final files directly and do not require a generation step.
 
 **Actor**: `cpt-cypilot-actor-user`
 
@@ -180,25 +186,26 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 - User runs `cpt validate-kits` → all installed kits validated, PASS with coverage report
 
 **Error Scenarios**:
-- Kit missing `blueprints/` directory → FAIL with details
-- Blueprint missing mandatory `@cpt:blueprint` marker → FAIL with details
+- Kit config directory missing or empty → FAIL with details
+- Kit `conf.toml` missing or invalid → FAIL with details
 
 **Steps**:
 1. [x] - `p1` - User invokes `cpt validate-kits` - `inst-user-validate-kits`
 2. [x] - `p1` - Load all registered kits from `{cypilot_path}/config/core.toml` - `inst-load-registered-kits`
 3. [x] - `p1` - **FOR EACH** kit - `inst-foreach-validate-kit`
-   1. [x] - `p1` - Verify `blueprints/` directory exists in user-editable path - `inst-verify-blueprints-dir`
-   2. [x] - `p1` - **FOR EACH** blueprint file in `blueprints/` - `inst-foreach-blueprint`
-      1. [x] - `p1` - Parse blueprint and validate marker syntax - `inst-validate-markers`
-      2. [x] - `p1` - Verify `@cpt:blueprint` identity marker present - `inst-verify-identity`
-      3. [x] - `p1` - Verify at least one `@cpt:heading` or output marker present - `inst-verify-content`
+   1. [x] - `p1` - Verify kit config directory exists at registered path - `inst-verify-kit-dir`
+   2. [x] - `p1` - Verify `conf.toml` exists in `{cypilot_path}/kits/{slug}/` with valid `slug` and `version` - `inst-verify-conf`
+   3. [x] - `p1` - Verify kit has at least one artifact directory or constraints file - `inst-verify-content`
+   4. [x] - `p1` - **IF** kit has `blueprints/` directory (legacy): validate blueprint marker syntax for backward compat - `inst-verify-legacy-blueprints`
 4. [x] - `p1` - **RETURN** validation result (PASS/FAIL, per-kit details) - `inst-return-validate-ok`
 
 ## 3. Processes / Business Logic (CDSL)
 
-### Parse Blueprint
+### Parse Blueprint (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-algo-blueprint-system-parse-blueprint`
+
+> **LEGACY**: Blueprint parsing is preserved for backward compatibility with v2/early-v3 installations. New kits ship final files directly.
 
 **Input**: Path to a single blueprint `.md` file
 
@@ -229,9 +236,11 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 5. [x] - `p1` - **IF** any non-singleton marker lacks an explicit syntax ID, emit deprecation warning (legacy fallback used) - `inst-warn-legacy`
 6. [x] - `p1` - **RETURN** parsed blueprint with ordered segment list (text blocks and markers with stable identity keys) - `inst-return-parsed`
 
-### Process Kit
+### Process Kit (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-algo-blueprint-system-process-kit`
+
+> **LEGACY**: Blueprint processing is preserved for backward compatibility. New kits ship final files directly and do not require a generation step.
 
 **Input**: Kit slug, path to kit's `blueprints/` directory
 
@@ -250,9 +259,11 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 7. [x] - `p1` - For each generated output: if existing file differs, delegate to Resource Diff Engine for interactive resolution - `inst-resource-diff`
 8. [x] - `p1` - **RETURN** list of generated file paths - `inst-return-generated`
 
-### Generate Per-Artifact Outputs
+### Generate Per-Artifact Outputs (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-algo-blueprint-system-generate-artifact-outputs`
+
+> **LEGACY**: Output generation from blueprints is preserved for backward compatibility.
 
 **Input**: Parsed blueprint, artifact kind, output directory (kit config directory, e.g. `{cypilot_path}/config/kits/{slug}/artifacts/{KIND}/`)
 
@@ -269,9 +280,11 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 7. [x] - `p1` - Write all generated files to output directory - `inst-write-outputs`
 8. [x] - `p1` - **RETURN** list of written file paths - `inst-return-outputs`
 
-### Generate Kit-Wide Constraints
+### Generate Kit-Wide Constraints (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-algo-blueprint-system-generate-constraints`
+
+> **LEGACY**: Constraint generation from blueprints is preserved for backward compatibility. New kits include `constraints.toml` directly.
 
 **Input**: List of parsed blueprints for a kit
 
@@ -299,9 +312,11 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 
 **Steps**:
 
-### Three-Way Merge
+### Three-Way Merge (LEGACY)
 
 - [x] `p2` - **ID**: `cpt-cypilot-algo-blueprint-system-three-way-merge`
+
+> **LEGACY**: Marker-level three-way merge is preserved for backward compatibility with blueprint-based kits. New kit updates use file-level diff (`cpt-cypilot-algo-kit-file-update`).
 
 **Input**: Old reference blueprint (previous version from cache), user blueprint (`{cypilot_path}/kits/{slug}/blueprints/`), new blueprint (current version from cache)
 
@@ -414,7 +429,7 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 
 ### Resource Diff Engine
 
-- [x] `p1` - **ID**: `cpt-cypilot-algo-blueprint-system-diff-engine`
+- [ ] `p1` - **ID**: `cpt-cypilot-algo-blueprint-system-diff-engine`
 
 **Input**: Directory path, old snapshot (filename → bytes), file extensions to track
 
@@ -424,11 +439,74 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 1. [x] - `p1` - Snapshot directory: read all files matching extensions into a `{relative_path: bytes}` map - `inst-snapshot`
 2. [x] - `p1` - Diff snapshot: compare current directory state against old snapshot, classify files as added/removed/modified - `inst-diff`
 3. [x] - `p1` - Show diff summary: print added/removed/modified file counts and paths to stderr with colour coding - `inst-show-summary`
-4. [x] - `p1` - Interactive review: prompt user per-file to accept, reject, or modify changes; support accept-all/reject-all shortcuts - `inst-interactive`
+4. [ ] - `p1` - Interactive review: prompt user per-file using `cpt-cypilot-algo-kit-interactive-diff` (accept/decline/accept all/decline all/modify) - `inst-interactive`
 
-### Blueprint Hash Detection
+### File-Level Kit Update
+
+- [ ] `p1` - **ID**: `cpt-cypilot-algo-kit-file-update`
+
+**Input**: Kit source directory (from cache), kit config directory (user's installed copy at `{cypilot_path}/config/kits/{slug}/`), interactive flag
+
+**Output**: Update report — list of files with per-file action taken (accepted, declined, modified, added, removed, unchanged)
+
+**Steps**:
+1. [ ] - `p1` - Enumerate all files recursively in source directory (excluding `conf.toml`, `blueprint_hashes.toml`, `blueprints/`) - `inst-enum-source`
+2. [ ] - `p1` - Enumerate all files recursively in user's kit config directory - `inst-enum-user`
+3. [ ] - `p1` - Classify each file - `inst-classify`
+   1. [ ] - `p1` - **IF** file in source AND NOT in user → classify as `added` - `inst-classify-added`
+   2. [ ] - `p1` - **IF** file in user AND NOT in source → classify as `removed` - `inst-classify-removed`
+   3. [ ] - `p1` - **IF** file in both AND content identical → classify as `unchanged` - `inst-classify-unchanged`
+   4. [ ] - `p1` - **IF** file in both AND content differs → classify as `modified` - `inst-classify-modified`
+4. [ ] - `p1` - **IF** no changes detected **RETURN** empty report with "current" status - `inst-if-no-changes`
+5. [ ] - `p1` - Show summary: count of added/removed/modified/unchanged files - `inst-show-summary`
+6. [ ] - `p1` - **FOR EACH** changed file (added, removed, modified) in sorted order - `inst-foreach-changed`
+   1. [ ] - `p1` - Show unified diff (git-style) for the file - `inst-show-file-diff`
+   2. [ ] - `p1` - Prompt user via `cpt-cypilot-algo-kit-interactive-diff` - `inst-prompt-user`
+   3. [ ] - `p1` - Apply user's decision: write new content (accept), keep old (decline), or write user-edited content (modify) - `inst-apply-decision`
+7. [ ] - `p1` - **RETURN** update report with per-file actions - `inst-return-report`
+
+### Interactive File Diff
+
+- [ ] `p1` - **ID**: `cpt-cypilot-algo-kit-interactive-diff`
+
+**Input**: File path, old content (bytes), new content (bytes), current review state (tracks accept-all/decline-all)
+
+**Output**: User decision (`accept`, `decline`, `modify`) and optionally edited content
+
+**Prompt format**:
+```
+--- old/{relative_path}
++++ new/{relative_path}
+@@ ... @@
+ context line
+-removed line
++added line
+ context line
+
+  [a]ccept  [d]ecline  [A]ccept all  [D]ecline all  [m]odify
+```
+
+**Steps**:
+1. [ ] - `p1` - **IF** review state has `accept_all` flag set **RETURN** `accept` immediately - `inst-if-accept-all`
+2. [ ] - `p1` - **IF** review state has `decline_all` flag set **RETURN** `decline` immediately - `inst-if-decline-all`
+3. [ ] - `p1` - Show unified diff to stderr using `difflib.unified_diff` with colour coding (green for additions, red for removals, cyan for hunk headers) - `inst-show-diff`
+4. [ ] - `p1` - Prompt: `[a]ccept  [d]ecline  [A]ccept all  [D]ecline all  [m]odify` - `inst-prompt`
+5. [ ] - `p1` - **IF** user selects `a` (accept) **RETURN** `accept` - `inst-accept`
+6. [ ] - `p1` - **IF** user selects `d` (decline) **RETURN** `decline` - `inst-decline`
+7. [ ] - `p1` - **IF** user selects `A` (accept all) → set `accept_all` flag in review state, **RETURN** `accept` - `inst-accept-all`
+8. [ ] - `p1` - **IF** user selects `D` (decline all) → set `decline_all` flag in review state, **RETURN** `decline` - `inst-decline-all`
+9. [ ] - `p1` - **IF** user selects `m` (modify) → open editor with new content, **RETURN** `modify` with edited content - `inst-modify`
+   1. [ ] - `p1` - Write new content to temporary file with correct extension - `inst-write-temp`
+   2. [ ] - `p1` - Open `$VISUAL` or `$EDITOR` or `vi` on temp file - `inst-open-editor`
+   3. [ ] - `p1` - Read back edited content, clean up temp file - `inst-read-edited`
+   4. [ ] - `p1` - **IF** edited content is empty **RETURN** `decline` (abort) - `inst-if-empty-abort`
+   5. [ ] - `p1` - **RETURN** `modify` with edited content bytes - `inst-return-modified`
+
+### Blueprint Hash Detection (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-algo-blueprint-system-hash-detection`
+
+> **LEGACY**: Hash-based customization detection is preserved for backward compatibility. New kit updates use direct file comparison.
 
 **Input**: Kit directory (blueprints + scripts), source directory with `blueprint_hashes.toml`
 
@@ -458,9 +536,11 @@ Eliminates resource duplication across kit artifacts. Without blueprints, every 
 
 ## 5. Definitions of Done
 
-### Blueprint Parsing
+### Blueprint Parsing (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-parsing`
+
+> **LEGACY**: Preserved for backward compatibility with v2/early-v3 installations.
 
 The system **MUST** parse blueprint `.md` files, extracting all `@cpt:` marker types (`blueprint`, `heading`, `id`, `rule`, `check`, `prompt`, `example`, `rules`, `checklist`, `skill`, `system-prompt`, `workflow`) with their content, metadata, line ranges, and stable identity keys. The parser **MUST** support both named syntax (`` `@cpt:TYPE:ID` ``) and legacy syntax (`` `@cpt:TYPE` ``). Identity keys **MUST** be resolved via the chain: explicit syntax ID → TOML-derived key → positional index fallback. Non-singleton markers without explicit IDs **MUST** produce a deprecation warning. Malformed markers **MUST** produce actionable error messages with file path and line number.
 
@@ -473,9 +553,11 @@ The system **MUST** parse blueprint `.md` files, extracting all `@cpt:` marker t
 **Covers (DESIGN)**:
 - `cpt-cypilot-component-blueprint-processor`
 
-### Per-Artifact Resource Generation
+### Per-Artifact Resource Generation (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-artifact-gen`
+
+> **LEGACY**: Preserved for backward compatibility with v2/early-v3 installations.
 
 The system **MUST** generate four output files per artifact blueprint: `rules.md` (from `@cpt:rules` + `@cpt:rule`), `checklist.md` (from `@cpt:checklist` + `@cpt:check`), `template.md` (from `@cpt:heading` + `@cpt:prompt`, with placeholder syntax preserved), and `example.md` (from `@cpt:heading` examples + `@cpt:example`). Codebase blueprints (without `artifact` key) **MUST** generate `codebase/rules.md` and `codebase/checklist.md` instead.
 
@@ -489,9 +571,11 @@ The system **MUST** generate four output files per artifact blueprint: `rules.md
 - `cpt-cypilot-component-blueprint-processor`
 - `cpt-cypilot-principle-dry`
 
-### Kit-Wide Constraints Generation
+### Kit-Wide Constraints Generation (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-constraints-gen`
+
+> **LEGACY**: Preserved for backward compatibility. New kits include `constraints.toml` directly.
 
 The system **MUST** aggregate `@cpt:heading` and `@cpt:id` markers from all blueprints in a kit into a single `constraints.toml` in the kit's config directory (e.g. `{cypilot_path}/config/kits/{slug}/constraints.toml`). The constraints file **MUST** define ID kinds with their `to_code`, `defined_in`, and `referenced_in` attributes, using deterministic TOML serialization.
 
@@ -509,7 +593,7 @@ The system **MUST** aggregate `@cpt:heading` and `@cpt:id` markers from all blue
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-kit-install`
 
-The system **MUST** provide `cypilot kit install <path>` that copies blueprints to `{cypilot_path}/kits/{slug}/blueprints/` (user-editable), copies `conf.toml` to `{cypilot_path}/kits/{slug}/` (hash file stays in source), processes all blueprints to generate outputs into the kit config directory, and registers the kit in `{cypilot_path}/config/core.toml` with the config output path. Installation of an already-registered kit without `--force` **MUST** produce exit code 2 with a helpful message.
+The system **MUST** provide `cypilot kit install <path>` that copies all kit files to `{cypilot_path}/config/kits/{slug}/`, copies `conf.toml` to `{cypilot_path}/kits/{slug}/`, seeds default config files into `{cypilot_path}/config/`, registers the kit in `{cypilot_path}/config/core.toml` with the config output path, and regenerates `.gen/AGENTS.md` and `.gen/SKILL.md` to include the new kit's navigation and skill routing. Installation of an already-registered kit without `--force` **MUST** produce exit code 2 with a helpful message.
 
 **Implements**:
 - `cpt-cypilot-flow-blueprint-system-kit-install`
@@ -523,13 +607,14 @@ The system **MUST** provide `cypilot kit install <path>` that copies blueprints 
 
 ### Kit Update
 
-- [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-kit-update`
+- [ ] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-kit-update`
 
-The system **MUST** provide `cypilot kit update [--force] [--kit SLUG]`. Force mode **MUST** overwrite all user blueprints and regenerate outputs. Smart mode (default) **MUST** use hash-based customization detection — computing SHA-256 of each user blueprint against known hashes for the user’s installed version from source `blueprint_hashes.toml`. Unmodified blueprints **MUST** be auto-updated silently; customized blueprints **MUST** trigger interactive diff via the Resource Diff Engine. All generated outputs (SKILL.md, constraints.toml, artifacts/, codebase/, workflows/, scripts/) **MUST** also use interactive diff when regenerated content differs from user's version.
+The system **MUST** provide `cypilot kit update [--force] [--kit SLUG]`. Force mode **MUST** overwrite all kit files from source without prompts. Interactive mode (default) **MUST** compare each source file against the user's installed version using `cpt-cypilot-algo-kit-file-update`. For each changed file, the system **MUST** show a unified diff (git-style) and prompt the user with: `[a]ccept`, `[d]ecline`, `[A]ccept all`, `[D]ecline all`, `[m]odify` via `cpt-cypilot-algo-kit-interactive-diff`. After all kits are updated, the system **MUST** regenerate `.gen/AGENTS.md` and `.gen/SKILL.md` from all installed kits. The update report **MUST** include per-file actions taken.
 
 **Implements**:
 - `cpt-cypilot-flow-blueprint-system-kit-update`
-- `cpt-cypilot-algo-blueprint-system-three-way-merge`
+- `cpt-cypilot-algo-kit-file-update`
+- `cpt-cypilot-algo-kit-interactive-diff`
 
 **Covers (PRD)**:
 - `cpt-cypilot-fr-core-kits`
@@ -538,9 +623,11 @@ The system **MUST** provide `cypilot kit update [--force] [--kit SLUG]`. Force m
 - `cpt-cypilot-component-kit-manager`
 - `cpt-cypilot-principle-no-manual-maintenance`
 
-### Kit Migrate
+### Kit Migrate (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-kit-migrate`
+
+> **LEGACY**: Preserved for backward compatibility with blueprint-based installations.
 
 The system **MUST** provide `cypilot kit migrate [--kit SLUG] [--dry-run]` that detects kit-level version drift between cache and installed `conf.toml`, applies identity-key-based three-way merge to all `.md` blueprints (matching markers by stable identity key — explicit syntax ID, TOML-derived key, or positional fallback), updates the kit version in `{cypilot_path}/kits/{slug}/conf.toml`, and regenerates outputs with interactive diff for user-modified resources. Kits with no version drift **MUST** be skipped with "current" status.
 
@@ -560,7 +647,7 @@ The system **MUST** provide `cypilot kit migrate [--kit SLUG] [--dry-run]` that 
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-validate-kits`
 
-The system **MUST** provide `cpt validate-kits` that validates all installed kits have a `blueprints/` directory, each blueprint has a valid `@cpt:blueprint` identity marker, and marker syntax is correct. Output **MUST** be JSON with PASS/FAIL status and per-kit details.
+The system **MUST** provide `cpt validate-kits` that validates all installed kits have a kit config directory at the registered path, a valid `conf.toml` with `slug` and `version`, and at least one artifact directory or constraints file. For legacy kits with a `blueprints/` directory, marker syntax **MUST** also be validated. Output **MUST** be JSON with PASS/FAIL status and per-kit details.
 
 **Implements**:
 - `cpt-cypilot-flow-blueprint-system-validate-kits`
@@ -571,9 +658,11 @@ The system **MUST** provide `cpt validate-kits` that validates all installed kit
 **Covers (DESIGN)**:
 - `cpt-cypilot-component-kit-manager`
 
-### Resource Regeneration
+### Resource Regeneration (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-blueprint-system-regenerate`
+
+> **LEGACY**: Preserved for backward compatibility. New kits ship final files directly.
 
 The system **MUST** provide `cpt generate-resources [--kit SLUG]` that re-processes all blueprints for the specified kit (or all kits) and regenerates all output files. This enables users to customize blueprints and see the results without a full kit update cycle.
 
@@ -592,31 +681,36 @@ The system **MUST** provide `cpt generate-resources [--kit SLUG]` that re-proces
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| Kit Command | `skills/.../commands/kit.py` | Kit install, update, generate-resources CLI handlers |
+| Kit Command | `skills/.../commands/kit.py` | Kit install, update, file-level diff, generate-resources (legacy) CLI handlers |
 | Validate Kits | `skills/.../commands/validate_kits.py` | Kit structural validation command |
-| Blueprint Utils | `skills/.../utils/blueprint.py` | Blueprint parsing, `@cpt:` marker extraction, resource generation |
-| Diff Engine | `skills/.../utils/diff_engine.py` | Directory snapshot, diff, interactive review for resource changes |
+| Blueprint Utils | `skills/.../utils/blueprint.py` | (LEGACY) Blueprint parsing, `@cpt:` marker extraction, resource generation |
+| Diff Engine | `skills/.../utils/diff_engine.py` | File-level diff, unified diff display, interactive review (accept/decline/accept all/decline all/modify) |
 | Constraints Utils | `skills/.../utils/constraints.py` | Constraint loading and validation (shared with F-03) |
 
 ## 7. Acceptance Criteria
 
-- [x] `cypilot kit install <path>` copies blueprints to `kits/{slug}/blueprints/`, computes hashes, generates outputs into kit config directory, and registers in `{cypilot_path}/config/core.toml`
-- [x] `cypilot kit update --force` overwrites user blueprints and regenerates all outputs
-- [x] `cypilot kit update` (smart mode) uses hash-based detection: unmodified blueprints auto-update, customized trigger interactive diff
-- [x] All generated outputs (SKILL.md, constraints.toml, artifacts/, codebase/, workflows/, scripts/) use interactive diff when regenerated content differs from user's version
-- [x] `cpt generate-resources` re-processes all blueprints and regenerates outputs from user-edited blueprints
-- [x] `cpt validate-kits` reports PASS for structurally valid kits and FAIL with details for invalid ones
-- [x] Blueprint parsing handles all marker types: `@cpt:blueprint`, `@cpt:heading`, `@cpt:id`, `@cpt:rule`, `@cpt:check`, `@cpt:prompt`, `@cpt:example`, `@cpt:rules`, `@cpt:checklist`, `@cpt:skill`, `@cpt:system-prompt`, `@cpt:workflow`
-- [x] Blueprint parsing supports both named syntax (`` `@cpt:TYPE:ID` ``) and legacy syntax (`` `@cpt:TYPE` ``)
-- [x] Identity keys are resolved via the chain: explicit syntax ID → TOML-derived key → positional index fallback
-- [x] Non-singleton markers without explicit IDs produce a deprecation warning
-- [x] Three-way merge matches markers by stable identity key, not by position
-- [x] Three-way merge inserts new markers at anchor-relative positions (nearest preceding known marker as anchor; forward search when preceding anchor deleted; append as last resort)
-- [x] Three-way merge respects user deletions: markers present in old reference but absent from user segments are not re-inserted
-- [x] Generated `template.md` preserves placeholder syntax `{descriptive text}` from `@cpt:heading` markers
-- [x] Generated `constraints.toml` aggregates ID kinds with `to_code`, `defined_in`, `referenced_in` from all blueprints
-- [x] Malformed blueprint markers produce actionable error messages with file path and line number
-- [x] All commands output JSON to stdout and use exit codes 0/1/2
+**Kit Installation (file-based)**:
+- [x] `cypilot kit install <path>` copies kit files to `config/kits/{slug}/`, copies `conf.toml` to `kits/{slug}/`, seeds config, and registers in `{cypilot_path}/config/core.toml`
 - [x] Kit installation during `cpt init` works identically to explicit `cypilot kit install`
-- [x] SHA-256 hashes stored in kit source `blueprint_hashes.toml` (keyed by version, never installed to user projects)
-- [x] Resource Diff Engine supports: accept-file, reject-file, accept-all, reject-all, modify (with git-style conflict markers)
+- [x] Installation of already-registered kit without `--force` produces exit code 2
+
+**Kit Update (file-level diff)**:
+- [ ] `cypilot kit update --force` overwrites all kit files from source without prompts
+- [ ] `cypilot kit update` (interactive mode) shows unified diff per changed file
+- [ ] Interactive diff prompt offers: `[a]ccept`, `[d]ecline`, `[A]ccept all`, `[D]ecline all`, `[m]odify`
+- [ ] `[A]ccept all` and `[D]ecline all` apply to all remaining files without further prompts
+- [ ] `[m]odify` opens `$VISUAL`/`$EDITOR`/`vi` with new content for user editing
+- [ ] Unified diff uses git-style format with colour coding (green=additions, red=removals, cyan=hunks)
+- [ ] Update report includes per-file actions taken (accepted/declined/modified/added/removed)
+- [ ] Files identical between source and user are skipped silently
+- [ ] `--dry-run` shows what would be done without writing
+
+**Kit Structural Validation**:
+- [x] `cpt validate-kits` reports PASS for structurally valid kits and FAIL with details for invalid ones
+- [x] All commands output JSON to stdout and use exit codes 0/1/2
+
+**Legacy (backward compat)**:
+- [x] Blueprint parsing handles all marker types and both named/legacy syntax
+- [x] Three-way merge matches markers by stable identity key, not by position
+- [x] `cpt generate-resources` re-processes blueprints and regenerates outputs (legacy kits only)
+- [x] Resource Diff Engine supports: accept, decline, accept-all, decline-all, modify

@@ -55,7 +55,7 @@
 
 ### 1.1 Overview
 
-Migrate existing Cypilot v2 projects (adapter-based, `artifacts.json`, legacy kit structure) to v3 (blueprint-based, `artifacts.toml`, global CLI installer, `config/` directory) with zero data loss. The migration handles complex real-world projects with multiple systems, nested autodetect rules, custom WHEN rules, and legacy JSON config files.
+Migrate existing Cypilot v2 projects (adapter-based, `artifacts.json`, legacy kit structure) to v3 (file-package kits, `artifacts.toml`, global CLI installer, `config/` directory) with zero data loss. The migration handles complex real-world projects with multiple systems, nested autodetect rules, custom WHEN rules, and legacy JSON config files.
 
 Problem: V2 projects use `.cypilot-adapter/` with JSON configs and a flat kit structure that is incompatible with the v3 three-directory layout (`.core/`, `.gen/`, `config/`). Additionally, the v2 core directory (`.cypilot/`) may be installed in three different ways — as a git submodule, a git clone, or a plain directory — each requiring different cleanup strategies.
 Primary value: Enables existing v2 users to adopt v3 without manual restructuring or data loss.
@@ -266,7 +266,7 @@ This feature addresses the need for a seamless upgrade path from Cypilot v2 to v
    2. [x] - `p1` - **IF** kit is vanilla SDLC — `inst-kit-is-vanilla`
       1. [x] - `p1` - Remap legacy slug to `sdlc` — `inst-remap-kit-slug`
       2. [x] - `p1` - Map kit `path` to v3 location: `{cypilot_path}/.gen/kits/sdlc` — `inst-map-kit-path`
-      3. [x] - `p1` - Drop kit-level `artifacts{}` template/examples references (v3 regenerates from blueprints) — `inst-drop-kit-artifact-refs`
+      3. [x] - `p1` - Drop kit-level `artifacts{}` template/examples references (v3 uses direct file packages) — `inst-drop-kit-artifact-refs`
    3. [x] - `p1` - **ELSE** (custom/unknown kit) — `inst-kit-is-custom`
       1. [x] - `p1` - Preserve original kit slug verbatim — `inst-preserve-custom-slug`
       2. [x] - `p1` - Map kit `path` to v3 location: `{cypilot_path}/config/kits/{slug}` — `inst-map-custom-kit-path`
@@ -288,8 +288,8 @@ This feature addresses the need for a seamless upgrade path from Cypilot v2 to v
 **Steps**:
 1. [x] - `p1` - **FOR EACH** kit in v2 kits{} — `inst-iterate-kits-migrate`
    1. [x] - `p1` - **IF** kit is vanilla SDLC (slug `sdlc` or legacy alias) — `inst-kit-vanilla-check`
-      1. [x] - `p1` - Install SDLC kit from cache into `{cypilot_path}/config/kits/sdlc/blueprints/` — `inst-install-sdlc-blueprints`
-      2. [x] - `p1` - Regenerate blueprint outputs into `{cypilot_path}/.gen/kits/sdlc/` (templates, rules, checklists, examples, constraints.toml) — `inst-regen-sdlc-outputs`
+      1. [x] - `p1` - Install SDLC kit files from cache into `{cypilot_path}/config/kits/sdlc/` — `inst-install-sdlc-files`
+      2. [x] - `p1` - Copy kit outputs into `{cypilot_path}/.gen/kits/sdlc/` (for backward compat during migration) — `inst-copy-sdlc-outputs`
       3. [x] - `p1` - Add to vanilla_kits[] — `inst-add-vanilla-kit`
    2. [x] - `p1` - **ELSE** (custom/unknown kit) — `inst-kit-custom-migrate`
       1. [x] - `p1` - Copy v2 kit directory from `{adapter_path}/kits/{v2_slug}/` to `{cypilot_path}/config/kits/{slug}/` — `inst-copy-custom-kit-config`
@@ -390,10 +390,10 @@ This feature addresses the need for a seamless upgrade path from Cypilot v2 to v
 
 **Input**: Config directory (`{cypilot_path}/config/`), gen directory (`{cypilot_path}/.gen/`)
 
-**Output**: Populated `.gen/kits/` with processed blueprint outputs
+**Output**: Populated `.gen/kits/` with kit outputs
 
 **Steps**:
-1. [x] - `p1` - **FOR EACH** kit in `config/kits/` with `blueprints/`: copy scripts, run `process_kit`, write per-kit outputs - `inst-foreach-kit-regen`
+1. [x] - `p1` - **FOR EACH** kit in `config/kits/`: copy scripts, write per-kit outputs to `.gen/kits/` - `inst-foreach-kit-regen`
 2. [x] - `p1` - **IF** any kit produces errors **RAISE** RuntimeError with aggregated error list - `inst-raise-regen-errors`
 
 ### Write Gen AGENTS.md
@@ -593,10 +593,10 @@ The system **MUST** inject or update the `<!-- @cpt:root-agents -->` managed blo
 
 The system **MUST** distinguish between vanilla SDLC kits and custom/unknown kits during migration:
 
-1. **Vanilla SDLC kit** (slug `sdlc` or legacy aliases like `cf-sdlc`): The system **MUST** install from cache into `{cypilot_path}/config/kits/sdlc/blueprints/` and regenerate all blueprint outputs (templates, rules, checklists, examples, constraints.toml) into `{cypilot_path}/.gen/kits/sdlc/`. Legacy `constraints.json` files **MUST NOT** be migrated — they are regenerated from blueprints.
+1. **Vanilla SDLC kit** (slug `sdlc` or legacy aliases like `cf-sdlc`): The system **MUST** install kit files from cache into `{cypilot_path}/config/kits/sdlc/` and copy outputs into `{cypilot_path}/.gen/kits/sdlc/`. Legacy `constraints.json` files **MUST NOT** be migrated — they are replaced by the kit's `constraints.toml`.
 2. **Custom/unknown kits**: The system **MUST** copy the v2 kit directory as-is into `{cypilot_path}/config/kits/{slug}/` and copy existing outputs (artifacts/, codebase/, rules) into `{cypilot_path}/.gen/kits/{slug}/` without regeneration. If the custom kit contains `constraints.json`, the system **MUST** convert it to `constraints.toml` (JSON parse → TOML serialize) — this is a pure format conversion with no semantic interpretation. The system **MUST** emit a warning that the custom kit was not regenerated and requires manual review.
 
-The system **MUST NOT** attempt to regenerate or interpret custom kit content — it has no knowledge of custom kit blueprints or semantics. The `constraints.json` → `constraints.toml` conversion is the only transformation applied to custom kits.
+The system **MUST NOT** attempt to interpret custom kit content — it has no knowledge of custom kit structure or semantics. The `constraints.json` → `constraints.toml` conversion is the only transformation applied to custom kits.
 
 **Implements**:
 - `cpt-cypilot-flow-v2-v3-migration-migrate-project`
@@ -710,7 +710,7 @@ The system **MUST** provide `cpt migrate-config` to convert remaining JSON confi
 - [x] `cpt migrate-config` converts all JSON config files to TOML individually, skipping failed files
 - [x] Complex case: hyperspot project (2 systems, 2 autodetect patterns, 17 ignore rules, custom kit slug `cf-sdlc`) migrates successfully with zero data loss
 - [x] Agent entry points (`.windsurf/`, `.cursor/`, `.claude/`, `.github/`) are regenerated for v3 structure
-- [x] Vanilla SDLC kit (including legacy slug `cf-sdlc`) is fully regenerated from blueprints in v3 structure
+- [x] Vanilla SDLC kit (including legacy slug `cf-sdlc`) is fully installed from cache in v3 structure
 - [x] Custom/unknown kits are copied as-is to `config/kits/{slug}/` and `.gen/kits/{slug}/` with a warning emitted; `constraints.json` is converted to `constraints.toml`
 - [x] Submodule case: `.cypilot` as git submodule is fully deinitialized — `.gitmodules` entry removed, `.git/modules/` cleaned, submodule path removed from index
 - [x] Git clone case: `.cypilot` containing `.git/` directory is removed entirely, v3 structure created in its place

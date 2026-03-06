@@ -15,7 +15,7 @@ drivers:
   - cpt-cypilot-fr-core-hooks
   - cpt-cypilot-fr-core-completions
   - cpt-cypilot-fr-core-traceability
-  - cpt-cypilot-fr-core-blueprint
+  - cpt-cypilot-fr-core-kits
   - cpt-cypilot-interface-cli-json
 ---
 
@@ -167,7 +167,7 @@ cpt init [--dir DIR] [--agents AGENTS]
    - Autodetect rules for standard artifact kinds: `PRD.md`, `DESIGN.md`, `ADR/*.md`, `DECOMPOSITION.md`, `features/*.md` — all with default traceability levels and glob patterns
    - Default codebase entry: `path = "src"`, common extensions
    - Default ignore patterns: `vendor/*`, `node_modules/*`, `.git/*`
-7. Install all available kits. Each kit generates its config in `{cypilot_path}/config/kits/<slug>/` — blueprints, constraints, artifacts, workflows.
+7. Install all available kits by copying kit files into `{cypilot_path}/config/kits/<slug>/` (constraints, artifacts, workflows, SKILL.md) and registering in `core.toml`.
 8. Generate agent entry points for selected agents.
 9. Inject root `AGENTS.md` entry: insert managed `<!-- @cpt:root-agents -->` block at the beginning of `{project_root}/AGENTS.md` (create file if absent).
 10. Create `{cypilot_path}/config/AGENTS.md` with default WHEN rules for standard system prompts.
@@ -208,7 +208,7 @@ cpt update [--project-root P] [--dry-run] [--no-interactive] [-y/--yes]
 **Behavior**:
 1. Resolve project root and cypilot directory.
 2. Replace `.core/` from cache (always force-overwrite).
-3. For each kit in cache: update reference copy, compare blueprint versions (skip same, warn if migration needed, copy on first install), regenerate `.gen/` outputs from user blueprints.
+3. For each kit in cache: compare kit version (skip same, file-level diff if newer, copy on first install), update kit files in `config/kits/{slug}/` via interactive diff prompts.
 4. Write aggregate `.gen/AGENTS.md` and `.gen/SKILL.md` from collected kit parts.
 5. Ensure `config/` scaffold files exist (create only if missing).
 6. Re-inject root `AGENTS.md` and `CLAUDE.md` managed blocks.
@@ -242,7 +242,7 @@ cpt update [--project-root P] [--dry-run] [--no-interactive] [-y/--yes]
 Validate artifacts.
 
 ```
-cpt validate [--artifact PATH] [--system SYSTEM] [--kind KIND] [--strict] [--blueprints]
+cpt validate [--artifact PATH] [--system SYSTEM] [--kind KIND] [--strict]
 ```
 
 | Option | Description |
@@ -251,7 +251,6 @@ cpt validate [--artifact PATH] [--system SYSTEM] [--kind KIND] [--strict] [--blu
 | `--system SYSTEM` | Validate all artifacts for a system |
 | `--kind KIND` | Filter by artifact kind (PRD, DESIGN, etc.) |
 | `--strict` | Enable strict validation (all checklist items) |
-| `--blueprints` | Validate all blueprint files instead of artifacts |
 
 **Without arguments**: validate all registered artifacts across all systems.
 
@@ -268,18 +267,6 @@ cpt validate [--artifact PATH] [--system SYSTEM] [--kind KIND] [--strict] [--blu
    c. All ID references resolve to definitions.
 4. Output score breakdown with actionable issues (file path, line number, severity).
 
-**Behavior (blueprint validation, `--blueprints`)**:
-1. Discover all blueprint files in `{cypilot_path}/config/kits/<slug>/blueprints/*.md` across installed kits.
-2. For each blueprint:
-   a. **Header check** — `cpt:blueprint` marker present and is the first marker.
-   b. **Block closure** — all block markers (`cpt:skill`, `cpt:check`, `cpt:prompt`, `cpt:rule`, etc.) have matching `@/cpt:...` close tags.
-   c. **No nesting** — no block markers inside other block markers.
-   d. **Known markers** — all marker types are registered by core or a loaded kit.
-   e. **Attribute validity** — required attributes present, values in expected ranges.
-   f. **Unique IDs** — heading IDs and check IDs unique within the blueprint.
-   g. **Heading order** — `cpt:heading` markers appear in a valid document order (by level hierarchy).
-   h. **Version compatibility** — blueprint version supported by current processor.
-3. Output issues per blueprint with file path, line number, and error code.
 
 **Output** (JSON):
 ```json
@@ -488,7 +475,7 @@ cpt generate-agents [--agent AGENT]
 **Without `--agent`**: regenerate for all agents.
 
 **Behavior**:
-1. Collect `cpt:skill` extension sections from all loaded blueprints.
+1. Collect `SKILL.md` extensions from all installed kits.
 2. Compose the main SKILL.md from core commands + collected extensions.
 3. Generate workflow entry points in each agent's native format.
 4. Generate skill shims referencing the composed SKILL.md.
@@ -509,44 +496,7 @@ cpt generate-agents [--agent AGENT]
 
 ### generate-resources
 
-Generate all kit resources from blueprints.
-
-```
-cpt generate-resources [--kit KIT] [--artifact-kind KIND] [--dry-run] [--no-interactive] [-y]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--kit KIT` | Generate for a specific kit only |
-| `--artifact-kind KIND` | Generate for a specific artifact kind only |
-| `--dry-run` | Show what would be generated without writing |
-| `--no-interactive` | Disable interactive prompts for generated output diff |
-| `-y`, `--yes` | Auto-approve all prompts (accept all changes) |
-
-**Behavior**:
-1. Load all blueprints for target kits/artifact kinds.
-2. Snapshot current `.gen/kits/{slug}/` state before regeneration.
-3. Parse `@cpt:` markers.
-4. Invoke core output generators per marker type.
-5. Write output files (template.md, rules.md, checklist.md, example.md per artifact; constraints.toml kit-wide; codebase/ for non-artifact blueprints).
-6. Interactive diff review: compare regenerated output against snapshot. In interactive mode, prompt user per modified file (accept/reject/modify). In non-interactive mode, accept all changes.
-7. Generation is deterministic: same blueprint → same output.
-
-**Output** (JSON):
-```json
-{
-  "status": "PASS",
-  "kits_processed": 1,
-  "results": [
-    {
-      "kit": "sdlc",
-      "files_written": 25,
-      "artifact_kinds": ["PRD", "DESIGN"],
-      "gen_diff": {"added": [], "modified": ["artifacts/PRD/template.md"], "unchanged_count": 23}
-    }
-  ]
-}
-```
+> **DEPRECATED per `cpt-cypilot-adr-remove-blueprint-system`**: This command has been removed. Kit files are now authored directly and installed/updated via `cpt kit install` / `cpt kit update`. No generation step is needed.
 
 **Exit**: 0 on success, 1 on error.
 
@@ -570,7 +520,7 @@ cpt doctor
 | Config integrity | `{cypilot_path}/config/core.toml` exists and parses, schema valid |
 | Skill version | project skill matches or is newer than cache |
 | Kit structure | all registered kits have valid entry points |
-| Blueprint integrity | all blueprints in `{cypilot_path}/config/kits/<slug>/blueprints/` parse successfully, reference kits in `{cypilot_path}/kits/` present |
+| Kit file integrity | all kit files in `{cypilot_path}/config/kits/<slug>/` present and valid (conf.toml, constraints.toml, artifacts/, SKILL.md) |
 
 **Output** (JSON):
 ```json
@@ -832,26 +782,10 @@ CI pipelines should check for exit code 2 to detect validation failures.
     workflows/              # Core workflows (generate.md, analyze.md)
     requirements/           # Core requirement specs
     schemas/                # JSON schemas
-  .gen/                     # Auto-generated files (do not edit)
+  .gen/                     # Auto-generated aggregate files (do not edit)
     AGENTS.md               # Generated WHEN rules + system prompt content
     SKILL.md                # Navigation hub routing to per-kit skills
-    kits/
-      sdlc/
-        SKILL.md            # Per-kit skill from @cpt:skill blocks
-        constraints.toml    # Generated from @cpt:heading/@cpt:id markers
-        artifacts/          # Generated outputs per artifact kind
-          PRD/
-            template.md
-            rules.md
-            checklist.md
-            example.md
-          DESIGN/
-            ...
-        codebase/           # Generated from blueprints without artifact key
-          rules.md
-          checklist.md
-        workflows/          # Generated from @cpt:workflow markers
-        scripts/            # Copied from kit source
+    README.md               # Generated README
   config/                   # User-editable configuration
     AGENTS.md               # Project-level navigation (WHEN → sysprompt)
     SKILL.md                # User-editable skill extensions
@@ -860,16 +794,13 @@ CI pipelines should check for exit code 2 to detect validation failures.
     sysprompts/             # Project-specific system prompts
     kits/
       sdlc/
-        blueprints/         # User-editable blueprint copies
-          PRD.md
-          DESIGN.md
-          ...
         conf.toml           # Kit version metadata
-  kits/                     # Reference kit copies (read-only, for three-way diff)
-    sdlc/
-      blueprints/           # Reference blueprints
-      scripts/              # Reference scripts
-      conf.toml             # Kit version metadata
+        SKILL.md            # Per-kit skill instructions
+        constraints.toml    # Structural validation rules
+        artifacts/          # Per-artifact files (rules, template, checklist, examples)
+        codebase/           # Codebase review files
+        workflows/          # Workflow definitions
+        scripts/            # Kit-specific scripts
 ```
 
 ### Agent Entry Points (generated)
@@ -896,7 +827,7 @@ CI pipelines should check for exit code 2 to detect validation failures.
 | `SCHEMA_VALIDATION` | Config file does not match schema | Run `cpt doctor` for details |
 | `GH_CLI_NOT_FOUND` | `gh` CLI not installed (PR commands only) | Install `gh` CLI |
 | `GH_NOT_AUTHENTICATED` | `gh` CLI not authenticated | Run `gh auth login` |
-| `BLUEPRINT_UPDATE_CONFLICT` | User and kit both modified the same section during additive update | Resolve conflicts in `<KIND>.md.conflicts`, then run `cpt generate-resources` |
+| `KIT_UPDATE_CONFLICT` | User declined all file updates during kit update | Re-run `cpt kit update` to review changes |
 | `CACHE_EMPTY` | No cached skill and download failed | Check network, retry |
 
 ### Error Output

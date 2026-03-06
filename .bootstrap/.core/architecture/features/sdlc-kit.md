@@ -17,7 +17,7 @@
 - [4. States (CDSL)](#4-states-cdsl)
   - [Pipeline Position](#pipeline-position)
 - [5. Definitions of Done](#5-definitions-of-done)
-  - [Blueprint Coverage](#blueprint-coverage)
+  - [Kit File Coverage](#kit-file-coverage)
   - [Pipeline Completeness](#pipeline-completeness)
   - [Generated Output Integrity](#generated-output-integrity)
   - [Self-Check Command](#self-check-command)
@@ -34,17 +34,17 @@
 
 ### 1. Overview
 
-The SDLC kit delivers the primary domain content for Cypilot — blueprint `.md` files defining PRD, DESIGN, ADR, DECOMPOSITION, and FEATURE artifact kinds, plus a codebase blueprint for code review. Each blueprint uses `@cpt:` markers that the Blueprint Processor transforms into templates, rules, checklists, examples, and kit-wide constraints. The kit also provides pipeline guides (greenfield, brownfield, monolith) and a self-check command for verifying kit integrity.
+The SDLC kit delivers the primary domain content for Cypilot — per-artifact files (rules, templates, checklists, examples) for PRD, DESIGN, ADR, DECOMPOSITION, and FEATURE artifact kinds, plus codebase review files. The kit ships as a direct file package; all files are maintained as ready-to-use resources. The kit also provides pipeline guides (greenfield, brownfield, monolith) and a self-check command for verifying kit integrity.
 
 ### 2. Purpose
 
-Without SDLC-specific content, Cypilot is a generic ID system with no domain value. This kit provides the artifact-first development methodology — PRD → DESIGN → ADR → DECOMPOSITION → FEATURE → CODE — that is Cypilot's primary use case. Addresses PRD requirements for an artifact pipeline (`cpt-cypilot-fr-sdlc-pipeline`) and an SDLC blueprint package (`cpt-cypilot-fr-sdlc-plugin`).
+Without SDLC-specific content, Cypilot is a generic ID system with no domain value. This kit provides the artifact-first development methodology — PRD → DESIGN → ADR → DECOMPOSITION → FEATURE → CODE — that is Cypilot's primary use case. Addresses PRD requirements for an artifact pipeline (`cpt-cypilot-fr-sdlc-pipeline`) and an SDLC kit package (`cpt-cypilot-fr-sdlc-plugin`).
 
 ### 3. Actors
 
 | Actor | Role in Feature |
 |-------|-----------------|
-| `cpt-cypilot-actor-user` | Authors and customizes blueprints, runs self-check, follows pipeline guides |
+| `cpt-cypilot-actor-user` | Customizes kit files, runs self-check, follows pipeline guides |
 | `cpt-cypilot-actor-ai-agent` | Generates artifacts using kit templates/rules/checklists, follows pipeline ordering |
 | `cpt-cypilot-actor-cypilot-cli` | Executes self-check validation, resolves pipeline context |
 
@@ -88,11 +88,10 @@ Without SDLC-specific content, Cypilot is a generic ID system with no domain val
 **Actor**: `cpt-cypilot-actor-user`
 
 **Success Scenarios**:
-- User runs `cpt self-check` → all blueprint outputs verified, PASS with coverage report
+- User runs `cpt self-check` → all kit files verified, PASS with coverage report
 
 **Error Scenarios**:
-- Generated outputs missing or stale → FAIL with list of missing/stale files
-- Blueprint file has invalid markers → FAIL with marker errors and line numbers
+- Kit files missing → FAIL with list of missing files
 
 **Steps**:
 1. [x] - `p1` - User invokes `cpt self-check` - `inst-user-self-check`
@@ -101,7 +100,7 @@ Without SDLC-specific content, Cypilot is a generic ID system with no domain val
    1. [x] - `p1` - Validate kit completeness using `cpt-cypilot-algo-sdlc-kit-validate-completeness` - `inst-validate-kit`
 4. [x] - `p1` - Aggregate results across all kits - `inst-aggregate-results`
 5. [x] - `p1` - **IF** any kit fails **RETURN** FAIL with per-kit details - `inst-if-fail`
-6. [x] - `p1` - **RETURN** PASS with coverage summary (kits checked, blueprints found, outputs verified) - `inst-return-pass`
+6. [x] - `p1` - **RETURN** PASS with coverage summary (kits checked, artifact kinds found, files verified) - `inst-return-pass`
 
 ## 3. Processes / Business Logic (CDSL)
 
@@ -129,7 +128,7 @@ Without SDLC-specific content, Cypilot is a generic ID system with no domain val
 
 **Input**: Kit slug, path to kit's installed directory
 
-**Output**: Validation result: PASS/FAIL with details per blueprint
+**Output**: Validation result: PASS/FAIL with details per artifact kind
 
 **Steps**:
 1. [x] - `p1` - Define expected artifact kinds for SDLC kit: PRD, DESIGN, ADR, DECOMPOSITION, FEATURE - `inst-define-expected`
@@ -160,15 +159,15 @@ Without SDLC-specific content, Cypilot is a generic ID system with no domain val
 4. [x] - `p1` - **FROM** DECOMPOSED **TO** SPECIFIED **WHEN** at least one FEATURE artifact is registered - `inst-feature-registered`
 5. [x] - `p1` - **FROM** SPECIFIED **TO** COMPLETE **WHEN** all features in DECOMPOSITION have FEATURE artifacts - `inst-all-features`
 
-> Kit lifecycle state (UNINSTALLED → INSTALLED → OUTDATED) is owned by `cpt-cypilot-feature-blueprint-system` (`cpt-cypilot-state-blueprint-system-kit-install`).
+> Kit lifecycle state (UNINSTALLED → INSTALLED → OUTDATED) is owned by `cpt-cypilot-feature-blueprint-system` (kit management feature).
 
 ## 5. Definitions of Done
 
-### Blueprint Coverage
+### Kit File Coverage
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-sdlc-kit-blueprint-coverage`
 
-The SDLC kit **MUST** provide blueprint files for all five artifact kinds (PRD, DESIGN, ADR, DECOMPOSITION, FEATURE) and one codebase blueprint. Each blueprint **MUST** use SDLC-specific `@cpt:` markers: `@cpt:blueprint` (identity), `@cpt:heading` (template structure), `@cpt:id` (identifier kinds), `@cpt:check` (checklist items), `@cpt:rule` (rules), `@cpt:prompt` (writing instructions), `@cpt:example` (examples). Each blueprint **MUST** include `@cpt:skill` extensions for AI agent discoverability and `@cpt:workflow` definitions for generate/analyze operations.
+The SDLC kit **MUST** provide per-artifact files for all five artifact kinds (PRD, DESIGN, ADR, DECOMPOSITION, FEATURE) and codebase files. Each artifact kind **MUST** have: `rules.md`, `template.md`, `checklist.md`, and `examples/example.md`. The kit **MUST** include a `SKILL.md` for AI agent discoverability and workflow files in `workflows/` for generate/analyze operations.
 
 **Implements**:
 - `cpt-cypilot-flow-sdlc-kit-pipeline`
@@ -200,7 +199,7 @@ The SDLC kit **MUST** support the artifact-first pipeline: PRD → DESIGN → AD
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-sdlc-kit-output-integrity`
 
-All generated outputs (templates, rules, checklists, examples, constraints) **MUST** correctly reflect the current blueprint content. The Blueprint Processor **MUST** produce: `rules.md` (from `@cpt:rules` + `@cpt:rule`), `checklist.md` (from `@cpt:checklist` + `@cpt:check`), `template.md` (from `@cpt:heading` + `@cpt:prompt`), `example.md` (from `@cpt:heading` examples + `@cpt:example`), and `constraints.toml` (from `@cpt:heading` + `@cpt:id`). Codebase blueprint **MUST** produce `codebase/rules.md` and `codebase/checklist.md`.
+All kit files (templates, rules, checklists, examples, constraints) **MUST** be present and structurally valid. Each artifact kind **MUST** have: `rules.md`, `template.md`, `checklist.md`, and `examples/example.md`. Kit-wide files **MUST** include `constraints.toml` and `conf.toml`. Codebase directory **MUST** contain `codebase/rules.md` and `codebase/checklist.md`.
 
 **Implements**:
 - `cpt-cypilot-algo-sdlc-kit-validate-completeness`
@@ -216,7 +215,7 @@ All generated outputs (templates, rules, checklists, examples, constraints) **MU
 
 - [x] `p1` - **ID**: `cpt-cypilot-dod-sdlc-kit-self-check`
 
-The system **MUST** provide `cpt self-check` that validates all installed kits have complete generated outputs matching their blueprints. Output **MUST** be JSON with PASS/FAIL status, per-kit details, and coverage metrics (kinds verified, files checked). Missing or stale outputs **MUST** be reported with file paths and suggested fix commands.
+The system **MUST** provide `cpt self-check` that validates all installed kits have complete file sets. Output **MUST** be JSON with PASS/FAIL status, per-kit details, and coverage metrics (kinds verified, files checked). Missing files **MUST** be reported with file paths and suggested fix commands.
 
 **Implements**:
 - `cpt-cypilot-flow-sdlc-kit-self-check`
@@ -231,20 +230,20 @@ The system **MUST** provide `cpt self-check` that validates all installed kits h
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| SDLC Blueprints | `kits/sdlc/blueprints/*.md` | Artifact kind definitions with `@cpt:` markers |
+| SDLC Kit Files | `kits/sdlc/artifacts/*/` | Per-artifact files (rules, templates, checklists, examples) |
 | SDLC Config | `kits/sdlc/conf.toml` | Kit metadata and configuration |
 | PR Review Script | `kits/sdlc/scripts/pr.py` | PR review/status workflow entry point |
 | Artifacts Meta | `skills/.../utils/artifacts_meta.py` | Registry parsing, autodetect expansion (shared with F-01) |
 
 ## 7. Acceptance Criteria
 
-- [x] All 5 artifact blueprints (PRD, DESIGN, ADR, DECOMPOSITION, FEATURE) exist in `kits/sdlc/blueprints/` with correct `@cpt:` markers
-- [x] Codebase blueprint exists and generates `codebase/rules.md` and `codebase/checklist.md`
-- [x] Each blueprint includes `@cpt:skill` extensions and `@cpt:workflow` definitions
+- [x] All 5 artifact kinds (PRD, DESIGN, ADR, DECOMPOSITION, FEATURE) have per-artifact directories in `kits/sdlc/artifacts/` with required files (rules.md, template.md, checklist.md, examples/example.md)
+- [x] Codebase directory exists with `codebase/rules.md` and `codebase/checklist.md`
+- [x] Kit includes `SKILL.md` and workflow files in `workflows/`
 - [x] `cpt self-check` reports PASS for a correctly installed kit with complete outputs
 - [x] `cpt self-check` reports FAIL with details when outputs are missing or stale
 - [x] Pipeline guidance correctly identifies greenfield vs brownfield starting points
 - [x] Each artifact kind is usable independently without requiring prior artifact kinds
 - [x] Guides exist for greenfield (`GREENFIELD.md`), brownfield (`BROWNFIELD.md`), and monolith (`MONOLITH.md`) scenarios
-- [x] Generated `constraints.toml` aggregates all heading and ID constraints from SDLC blueprints
+- [x] `constraints.toml` defines all heading and ID constraints for SDLC artifact kinds
 - [x] All commands output JSON to stdout and use exit codes 0 (PASS) / 2 (FAIL)

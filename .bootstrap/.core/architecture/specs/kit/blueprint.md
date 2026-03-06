@@ -11,6 +11,7 @@ drivers:
 
 # Blueprint Specification
 
+> **DEPRECATED per `cpt-cypilot-adr-remove-blueprint-system`**: The blueprint system has been removed. Kits are now direct file packages — all kit files (rules.md, template.md, checklist.md, examples/, constraints.toml, workflows/, SKILL.md) are authored and maintained directly by kit authors, not generated from blueprint markers. This specification is preserved solely as a reference for legacy v2/early-v3 installations that used the blueprint system. New kit development should follow [kit.md](kit.md) instead.
 
 <!-- toc -->
 

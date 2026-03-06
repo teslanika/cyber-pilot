@@ -14,7 +14,7 @@
 - [3. Processes / Business Logic (CDSL)](#3-processes-business-logic-cdsl)
   - [Update Pipeline](#update-pipeline)
   - [Layout Restructuring](#layout-restructuring)
-  - [Compare Blueprint Versions](#compare-blueprint-versions)
+  - [Compare Blueprint Versions (LEGACY)](#compare-blueprint-versions-legacy)
   - [Migrate Config](#migrate-config)
 - [4. States (CDSL)](#4-states-cdsl)
   - [Installation Version State](#installation-version-state)
@@ -35,7 +35,7 @@
 
 ### 1. Overview
 
-Enables project skill updates with config migration, and provides CLI commands for managing system definitions, ignore lists, and kit registrations. The update command refreshes `.core/` from cache, detects and auto-restructures old directory layouts, updates kits via hash-based customization detection with interactive diff, regenerates outputs into kit config directories, and ensures `config/` scaffold files exist without overwriting user content.
+Enables project skill updates with config migration, and provides CLI commands for managing system definitions, ignore lists, and kit registrations. The update command refreshes `.core/` from cache, detects and auto-restructures old directory layouts, updates kits via file-level diff with interactive accept/decline/modify prompts, and ensures `config/` scaffold files exist without overwriting user content.
 
 ### 2. Purpose
 
@@ -58,14 +58,14 @@ Ensures teams can upgrade Cypilot without losing configuration or customizations
 
 ### Update Project Installation
 
-- [x] `p1` - **ID**: `cpt-cypilot-flow-version-config-update`
+- [ ] `p1` - **ID**: `cpt-cypilot-flow-version-config-update`
 
 **Actor**: `cpt-cypilot-actor-user`
 
 **Success Scenarios**:
-- User runs `cpt update` → `.core/` refreshed from cache, old layout auto-restructured if detected, kits updated via hash-based detection, outputs regenerated with interactive diff, config scaffold ensured
-- Blueprint hash matches known default → blueprint auto-updated silently
-- Blueprint customized by user → interactive diff presented
+- User runs `cpt update` → `.core/` refreshed from cache, old layout auto-restructured if detected, kits updated via file-level diff with interactive prompts, config scaffold ensured
+- Kit file unchanged between versions → skipped silently
+- Kit file changed → unified diff shown, user prompted to accept/decline/modify
 
 **Error Scenarios**:
 - Cypilot not initialized → error with hint to run `cpt init`
@@ -77,7 +77,7 @@ Ensures teams can upgrade Cypilot without losing configuration or customizations
 3. [x] - `p1` - Replace `.core/` from cache (always force-overwrite) - `inst-replace-core`
 4. [x] - `p1` - Detect directory layout; if old layout detected, trigger automatic restructuring using `cpt-cypilot-algo-version-config-layout-restructure` - `inst-detect-layout`
 5. [x] - `p1` - Migrate `{cypilot_path}/config/core.toml` preserving all user settings - `inst-migrate-config`
-6. [x] - `p1` - For each kit: update via hash-based customization detection (unmodified blueprints auto-update, customized trigger interactive diff), regenerate outputs with interactive diff for user-modified resources - `inst-update-kits`
+6. [ ] - `p1` - For each kit: update via file-level diff using `cpt-cypilot-algo-kit-file-update` (unchanged files skipped, changed files prompt accept/decline/modify) - `inst-update-kits`
 7. [x] - `p1` - Ensure config scaffold files exist (create only if missing) - `inst-ensure-scaffold`
 8. [x] - `p1` - Regenerate agent entry points - `inst-regenerate-agents`
 9. [x] - `p1` - Run self-check to verify kit integrity (`run_self_check_from_meta`); include result in report, WARN if failed - `inst-self-check`
@@ -103,13 +103,13 @@ Ensures teams can upgrade Cypilot without losing configuration or customizations
 
 ### Update Pipeline
 
-- [x] `p1` - **ID**: `cpt-cypilot-algo-version-config-update-pipeline`
+- [ ] `p1` - **ID**: `cpt-cypilot-algo-version-config-update-pipeline`
 
 1. [x] - `p1` - Replace `.core/` from cache - `inst-replace-core-algo`
 2. [x] - `p1` - Detect and auto-restructure old directory layout - `inst-detect-layout-algo`
 3. [x] - `p1` - Migrate `{cypilot_path}/config/core.toml` - `inst-migrate-config-algo`
-4. [x] - `p1` - For each kit: hash-based customization detection, interactive diff for customized blueprints - `inst-update-kits-algo`
-5. [x] - `p1` - Regenerate outputs into kit config directories with interactive diff for user-modified resources - `inst-regen-algo`
+4. [ ] - `p1` - For each kit: file-level diff using `cpt-cypilot-algo-kit-file-update`, interactive accept/decline/modify per changed file - `inst-update-kits-algo`
+5. [ ] - `p1` - (Removed — no separate regen step; kit files are updated directly) - `inst-regen-algo`
 6. [x] - `p1` - Ensure config scaffold - `inst-scaffold-algo`
 
 ### Layout Restructuring
@@ -120,20 +120,21 @@ Ensures teams can upgrade Cypilot without losing configuration or customizations
 
 **Output**: Restructured directory layout or no-op if already new layout
 
-**Detection**: Old layout is detected when `{cypilot_path}/config/kits/{slug}/blueprints/` exists AND `{cypilot_path}/.gen/kits/{slug}/` exists. New layout has user blueprints in `kits/{slug}/` and generated outputs in `config/kits/{slug}/`.
+**Detection**: Old layout is detected when `{cypilot_path}/.gen/kits/{slug}/` exists.
 
 **Steps**:
 1. [x] - `p1` - Backup affected directories - `inst-layout-backup`
-2. [x] - `p1` - Move user blueprints: `config/kits/{slug}/blueprints/` → `kits/{slug}/blueprints/` - `inst-layout-move-blueprints`
-3. [x] - `p1` - Move kit config: `config/kits/{slug}/conf.toml` → `kits/{slug}/conf.toml` - `inst-layout-move-conf`
-4. [x] - `p1` - Clear `config/kits/{slug}/` (now empty of user data), move `.gen/kits/{slug}/` → `config/kits/{slug}/` (generated outputs) - `inst-layout-move-gen`
-5. [x] - `p1` - Remove `.gen/kits/` directory (preserve `.gen/AGENTS.md`, `.gen/SKILL.md`, `.gen/README.md`) - `inst-layout-clean-gen`
-6. [x] - `p1` - Update `core.toml` kit registrations with new paths (`config/kits/{slug}`) - `inst-layout-update-core`
-7. [x] - `p1` - **IF** any step fails, restore from backup and report error - `inst-layout-rollback`
+2. [x] - `p1` - Move generated outputs: `.gen/kits/{slug}/` → `config/kits/{slug}/` - `inst-layout-move-gen`
+3. [x] - `p1` - Remove old `kits/{slug}/` reference copies if present - `inst-layout-remove-refs`
+4. [x] - `p1` - Remove `.gen/kits/` directory (preserve `.gen/AGENTS.md`, `.gen/SKILL.md`, `.gen/README.md`) - `inst-layout-clean-gen`
+5. [x] - `p1` - Update `core.toml` kit registrations with new paths (`config/kits/{slug}`) - `inst-layout-update-core`
+6. [x] - `p1` - **IF** any step fails, restore from backup and report error - `inst-layout-rollback`
 
-### Compare Blueprint Versions
+### Compare Blueprint Versions (LEGACY)
 
 - [x] `p1` - **ID**: `cpt-cypilot-algo-version-config-compare-versions`
+
+> **LEGACY**: Blueprint version comparison is preserved for backward compatibility with v2/early-v3 installations. New kit updates use file-level diff (`cpt-cypilot-algo-kit-file-update`).
 
 1. - `p1` - Read `@cpt:blueprint` TOML block from each blueprint to extract version - `inst-read-versions`
 2. - `p1` - Compare cache version vs user version per blueprint - `inst-compare-per-bp`
@@ -165,12 +166,13 @@ Ensures teams can upgrade Cypilot without losing configuration or customizations
 - [x] `p1` - **ID**: `cpt-cypilot-dod-version-config-update`
 
 - [x] - `p1` - `cpt update` replaces `.core/` from cache
-- [x] - `p1` - `cpt update` detects old directory layout and auto-restructures (move blueprints from `config/kits/` to `kits/`, move generated outputs from `.gen/kits/` to `config/kits/`, compute initial hashes)
-- [x] - `p1` - `cpt update` updates kits via hash-based customization detection with interactive diff
-- [x] - `p1` - `cpt update` regenerates outputs into kit config directories with interactive diff for user-modified resources
+- [x] - `p1` - `cpt update` detects old directory layout and auto-restructures (move generated outputs from `.gen/kits/` to `config/kits/`, remove old reference copies)
+- [ ] - `p1` - `cpt update` updates kits via file-level diff: unchanged files skipped, changed files prompt accept/decline/modify
+- [ ] - `p1` - Interactive diff uses git-style unified format with `[a]ccept / [d]ecline / [A]ccept all / [D]ecline all / [m]odify`
 - [x] - `p1` - User config files in `config/` are NEVER overwritten (except through interactive diff acceptance)
-- [x] - `p1` - Blueprint version comparison detects same, migration needed, and missing states
+- [x] - `p1` - [LEGACY] Blueprint version comparison detects same, migration needed, and missing states
 - [x] - `p1` - `--dry-run` shows what would be done without writing
+- [ ] - `p1` - `cpt update` regenerates `.gen/AGENTS.md` and `.gen/SKILL.md` from all installed kits after kit updates
 - [x] - `p1` - `cpt update` automatically runs self-check after completion and includes result in report
 
 ### Config CLI Commands
@@ -193,15 +195,15 @@ Ensures teams can upgrade Cypilot without losing configuration or customizations
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| Update Command | `skills/.../commands/update.py` | Update pipeline, layout restructuring, hash-based detection, output regeneration |
+| Update Command | `skills/.../commands/update.py` | Update pipeline, layout restructuring, file-level kit diff |
 
 ## 7. Acceptance Criteria
 
-- [x] `cpt update` refreshes `.core/` and regenerates outputs without touching user config (unless interactive diff accepted)
+- [x] `cpt update` refreshes `.core/` without touching user config (unless interactive diff accepted)
 - [x] `cpt update` detects and auto-restructures old directory layout with backup and rollback
-- [x] Blueprint version comparison correctly identifies same, migration needed, and missing states
-- [x] Hash-based customization detection: unmodified blueprints auto-update, customized trigger interactive diff
-- [x] All generated outputs (SKILL.md, constraints.toml, artifacts/, codebase/, workflows/, scripts/) use interactive diff when content differs
+- [ ] `cpt update` updates kits via file-level diff with accept/decline/accept all/decline all/modify prompts
+- [ ] Unchanged kit files are skipped silently; changed files show unified diff
+- [x] [LEGACY] Blueprint version comparison correctly identifies same, migration needed, and missing states
 - [ ] `cpt config show` displays readable config summary
 - [ ] Config migration preserves all user settings with backup
 - [x] `cpt update` automatically runs self-check after update and reports WARN if integrity check fails
