@@ -341,7 +341,7 @@ def cmd_adapter_info(argv: list[str]) -> int:
         config["variables_by_kit"] = vars_result.get("kits", {})
         if vars_result.get("collisions"):
             config["variables_collisions"] = vars_result["collisions"]
-    except (ImportError, FileNotFoundError, OSError, ValueError) as exc:
+    except (ImportError, OSError, ValueError) as exc:
         config["variables"] = None
         config["variables_error"] = str(exc)
         config["variables_degraded"] = True

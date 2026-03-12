@@ -12,13 +12,42 @@ to absolute file paths.  Output is a flat dict suitable for
 
 import argparse
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.files import (
     find_cypilot_directory,
     find_project_root,
 )
 from ..utils.ui import ui
+
+
+# @cpt-begin:cpt-cypilot-algo-developer-experience-resolve-vars:p1:inst-merge-flat-dict
+def _merge_with_collision_tracking(
+    system_vars: Dict[str, str],
+    kit_vars: Dict[str, Dict[str, str]],
+) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
+    """Merge system and kit variables with first-writer-wins collision tracking.
+
+    Returns (flat_dict, collisions_list).
+    """
+    flat: Dict[str, str] = dict(system_vars)
+    collisions: List[Dict[str, str]] = []
+    owners: Dict[str, str] = {k: "system" for k in system_vars}
+    for slug, kvars in kit_vars.items():
+        for var_name, var_path in kvars.items():
+            if var_name in flat and flat[var_name] != var_path:
+                collisions.append({
+                    "variable": var_name,
+                    "kit": slug,
+                    "path": var_path,
+                    "previous_kit": owners[var_name],
+                    "previous_path": flat[var_name],
+                })
+                continue  # first-writer-wins; skip collision
+            flat[var_name] = var_path
+            owners[var_name] = slug
+    return flat, collisions
+# @cpt-end:cpt-cypilot-algo-developer-experience-resolve-vars:p1:inst-merge-flat-dict
 
 
 # @cpt-begin:cpt-cypilot-algo-developer-experience-resolve-vars:p1:inst-resolve-binding-path
@@ -90,25 +119,8 @@ def _collect_all_variables(
     # @cpt-end:cpt-cypilot-flow-developer-experience-resolve-vars:p1:inst-resolve-vars-foreach-kit
     # @cpt-end:cpt-cypilot-algo-developer-experience-resolve-vars:p1:inst-extract-kit-resources
 
-    # @cpt-begin:cpt-cypilot-algo-developer-experience-resolve-vars:p1:inst-merge-flat-dict
     # -- Flat merged dict (system + all kits) --
-    flat: Dict[str, str] = dict(system_vars)
-    collisions: list = []
-    owners: Dict[str, str] = {k: "system" for k in system_vars}
-    for slug, kvars in kit_vars.items():
-        for var_name, var_path in kvars.items():
-            if var_name in flat and flat[var_name] != var_path:
-                collisions.append({
-                    "variable": var_name,
-                    "kit": slug,
-                    "path": var_path,
-                    "previous_kit": owners[var_name],
-                    "previous_path": flat[var_name],
-                })
-                continue  # first-writer-wins; skip collision
-            flat[var_name] = var_path
-            owners[var_name] = slug
-    # @cpt-end:cpt-cypilot-algo-developer-experience-resolve-vars:p1:inst-merge-flat-dict
+    flat, collisions = _merge_with_collision_tracking(system_vars, kit_vars)
 
     # @cpt-begin:cpt-cypilot-algo-developer-experience-resolve-vars:p1:inst-return-structured
     result: Dict[str, Any] = {
@@ -179,7 +191,7 @@ def cmd_resolve_vars(argv: list[str]) -> int:
                 import tomllib
                 with open(cp, "rb") as f:
                     core_data = tomllib.load(f)
-            except Exception as exc:
+            except (tomllib.TOMLDecodeError, OSError) as exc:
                 import sys
                 sys.stderr.write(f"WARNING: Failed to parse {cp}: {exc}\n")
             break
