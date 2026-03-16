@@ -495,6 +495,8 @@ def cmd_init(argv: List[str]) -> int:
         copy_results = _copy_from_cache(CACHE_DIR, cypilot_dir, force=args.force)
     else:
         copy_results = {d: "dry_run" for d in COPY_DIRS}
+        for item in COPY_ARCHITECTURE_ITEMS:
+            copy_results[f"architecture/{item}"] = "dry_run"
     actions["copy"] = json.dumps(copy_results)
     # @cpt-end:cpt-cypilot-flow-core-infra-project-init:p1:inst-copy-skill
 
