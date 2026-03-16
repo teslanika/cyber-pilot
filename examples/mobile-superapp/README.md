@@ -243,7 +243,7 @@ mobile-superapp/
 │   └── IMPL-IOS.md
 └── docs/
     ├── TRACEABILITY.md    # Detailed traceability guide
-    ├── DESCRIPTION.md     # Full description (Russian)
+    ├── DESCRIPTION.md     # Full description
     └── SUMMARY.txt        # Plain text summary
 ```
 
@@ -303,7 +303,7 @@ Platform: cpt-superapp-fr-inapp-notifications (P1)
 ## Documentation
 
 - **[Traceability Guide](docs/TRACEABILITY.md)** — How requirement traceability works
-- **[Detailed Description](docs/DESCRIPTION.md)** — Full kit description (Russian)
+- **[Detailed Description](docs/DESCRIPTION.md)** — Full kit description
 - **[Summary](docs/SUMMARY.txt)** — Plain text overview
 
 ---

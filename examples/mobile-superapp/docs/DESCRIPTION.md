@@ -1,23 +1,23 @@
-# Mobile SuperApp Kit — Описание
+# Mobile SuperApp Kit — Description
 
-## Что это такое
+## What Is This
 
-Mobile SuperApp Kit — это кастомный набор шаблонов и правил для Cypilot, адаптированный под разработку мобильного приложения Constructor. Кит реализует многоуровневую иерархию документации с полной трассировкой требований от бизнес-целей до кода.
+Mobile SuperApp Kit is a custom set of templates and rules for Cypilot, adapted for mobile application development. The kit implements a multi-level documentation hierarchy with full requirement traceability from business goals to code.
 
-## Проблема, которую мы решаем
+## Problem We Solve
 
-При разработке мобильного SuperApp возникает сложность в управлении требованиями:
+When developing a mobile SuperApp, managing requirements becomes complex:
 
-1. **Платформа** (SuperApp) имеет общие требования (аутентификация, push-уведомления, deep links)
-2. **SubApp'ы** (Student, Proctor, Groups) имеют свои специфические требования
-3. **Экраны и функции** детализируют требования SubApp до конкретных UI/UX спецификаций
-4. **Код** должен быть связан с требованиями для проверки покрытия
+1. **Platform** (SuperApp) has shared requirements (authentication, push notifications, deep links)
+2. **SubApps** (Student, Proctor, Groups) have their own specific requirements
+3. **Screens and features** detail SubApp requirements into specific UI/UX specifications
+4. **Code** must be linked to requirements for coverage verification
 
-Стандартный SDLC kit Cypilot поддерживает только один уровень (система → фичи). Нам нужна каскадная структура.
+The standard Cypilot SDLC kit supports only one level (system → features). We need a cascading structure.
 
-## Что мы создали
+## What We Created
 
-### 1. Четырёхуровневая иерархия PRD
+### 1. Four-Level PRD Hierarchy
 
 ```
 L0: Platform PRD (Shared Kernel)
@@ -42,113 +42,113 @@ L3: Feature Spec (CDSL)
     └── Mark All as Read
 ```
 
-### 2. Каскадная трассировка требований
+### 2. Cascading Requirement Traceability
 
-Каждое требование на нижнем уровне ссылается на родительское:
+Each requirement at a lower level references its parent:
 
 ```
 Platform FR: cpt-superapp-fr-inapp-notifications
     │
-    │ refined-by (уточняется в контексте SubApp)
+    │ refined-by (refined in SubApp context)
     ▼
 SubApp FR: cpt-student-fr-notifications
     │
-    │ detailed-by (детализируется до конкретного экрана)
+    │ detailed-by (detailed to specific screen)
     ▼
 Epic FR: cpt-student-epic-notification-history-fr-badge
     │
-    │ specified-by (специфицируется в CDSL)
+    │ specified-by (specified in CDSL)
     ▼
 Feature: cpt-student-feature-notification-badge
     │
-    │ implemented-by (реализуется в коде)
+    │ implemented-by (implemented in code)
     ▼
 Code: @cpt-impl:cpt-student-feature-notification-badge
 ```
 
-### 3. Шаблоны документации
+### 3. Documentation Templates
 
-**PRD шаблоны:**
-- `PRD-SUBAPP.md` — для SubApp с таблицей "Traces To Platform"
-- `PRD-EPIC.md` — для экранов с таблицей "Traces To SubApp"
+**PRD templates:**
+- `PRD-SUBAPP.md` — for SubApp with "Traces To Platform" table
+- `PRD-EPIC.md` — for screens with "Traces To SubApp" table
 
-**DESIGN шаблоны:**
-- `DESIGN-PLATFORM.md` — архитектура платформы (KMP, Native vs WebView)
-- `DESIGN-SUBAPP.md` — модули SubApp (KMP, Android, iOS)
-- `DESIGN-EPIC.md` — компоненты экрана (MVI, Use Cases)
+**DESIGN templates:**
+- `DESIGN-PLATFORM.md` — platform architecture (KMP, Native vs WebView)
+- `DESIGN-SUBAPP.md` — SubApp modules (KMP, Android, iOS)
+- `DESIGN-EPIC.md` — screen components (MVI, Use Cases)
 
-**Другие шаблоны:**
-- `DECOMPOSITION-*.md` — декомпозиция на каждом уровне
-- `FEATURE-MOBILE.md` — CDSL спецификация с платформ-секциями
-- `IMPL-KMP/ANDROID/IOS.md` — референсы на код
+**Other templates:**
+- `DECOMPOSITION-*.md` — decomposition at each level
+- `FEATURE-MOBILE.md` — CDSL specification with platform sections
+- `IMPL-KMP/ANDROID/IOS.md` — code references
 
-### 4. Правила валидации
+### 4. Validation Rules
 
-Кит включает автоматические проверки:
+The kit includes automatic checks:
 
-| Правило | Описание |
-|---------|----------|
-| platform-fr-coverage | Каждый Platform FR должен быть refined в SubApp |
-| subapp-fr-coverage | Каждый SubApp FR должен быть detailed в Epic |
-| epic-fr-coverage | Каждый Epic FR должен быть specified в Feature |
-| feature-impl-coverage | Каждый Feature должен иметь @cpt-impl в коде |
+| Rule | Description |
+|------|-------------|
+| platform-fr-coverage | Every Platform FR must be refined in SubApp |
+| subapp-fr-coverage | Every SubApp FR must be detailed in Epic |
+| epic-fr-coverage | Every Epic FR must be specified in Feature |
+| feature-impl-coverage | Every Feature must have @cpt-impl in code |
 
-### 5. Именование идентификаторов
+### 5. ID Naming Conventions
 
-| Уровень | Паттерн | Пример |
-|---------|---------|--------|
+| Level | Pattern | Example |
+|-------|---------|---------|
 | Platform | `cpt-{platform}-fr-{slug}` | `cpt-superapp-fr-offline` |
 | SubApp | `cpt-{subapp}-fr-{slug}` | `cpt-student-fr-notifications` |
 | Epic | `cpt-{subapp}-epic-{epic}-fr-{slug}` | `cpt-student-epic-home-fr-badge` |
 | Feature | `cpt-{subapp}-feature-{slug}` | `cpt-student-feature-daily-goal` |
 
-## Как это помогает
+## Benefits
 
-1. **Прозрачность**: Видно, какие бизнес-требования покрыты, какие нет
-2. **Навигация**: Можно пройти от кода до бизнес-цели и обратно
-3. **Контроль**: Валидация предупреждает о "осиротевших" требованиях
-4. **Onboarding**: Новые разработчики понимают структуру проекта
-5. **Review**: PM и архитекторы видят полную картину требований
+1. **Transparency**: See which business requirements are covered and which are not
+2. **Navigation**: Trace from code to business goal and back
+3. **Control**: Validation warns about "orphaned" requirements
+4. **Onboarding**: New developers understand project structure
+5. **Review**: PM and architects see the full requirements picture
 
-## Пример использования
+## Usage Example
 
-### Задача: Добавить экран истории уведомлений
+### Task: Add notification history screen
 
-1. **Проверяем Platform PRD** — есть `cpt-superapp-fr-inapp-notifications`
-2. **Создаём SubApp FR** в Student PRD:
+1. **Check Platform PRD** — exists `cpt-superapp-fr-inapp-notifications`
+2. **Create SubApp FR** in Student PRD:
    ```markdown
    <!-- @cpt:id cpt-student-fr-notifications -->
    **Traces To:** `cpt-superapp-fr-inapp-notifications` (refines)
    ```
-3. **Создаём Epic PRD** для Notification History:
+3. **Create Epic PRD** for Notification History:
    ```markdown
    <!-- @cpt:id cpt-student-epic-notification-history-fr-badge -->
    **Traces To:** `cpt-student-fr-notifications` (details)
    ```
-4. **Запускаем валидацию**:
+4. **Run validation**:
    ```bash
    cpt validate --check=subapp-fr-coverage
    ```
 
-## Установка
+## Installation
 
 ```bash
 cd mobile-superapp
 ./cypilot/kits/mobile-superapp/install.sh
 ```
 
-Скрипт создаст симлинк в папку китов Cypilot и (опционально) обновит `artifacts.toml`.
+The script creates a symlink to the Cypilot kits folder and (optionally) updates `artifacts.toml`.
 
-## Откат
+## Rollback
 
 ```bash
 ./cypilot/kits/mobile-superapp/uninstall.sh
 ```
 
-Стандартный SDLC kit остаётся нетронутым.
+The standard SDLC kit remains untouched.
 
 ---
 
-**Версия:** 2.0  
-**Дата:** Март 2026  
-**Автор:** Constructor Mobile Team
+**Version:** 2.0  
+**Date:** March 2026  
+**Author:** Constructor Mobile Team
