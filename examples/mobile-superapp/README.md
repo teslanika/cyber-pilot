@@ -140,15 +140,51 @@ cpt-superapp-fr-inapp-notifications
 
 ## ID Naming Conventions
 
-| Level | Pattern | Example |
-|-------|---------|---------|
-| Platform FR | `cpt-{platform}-fr-{slug}` | `cpt-superapp-fr-offline-support` |
-| Platform NFR | `cpt-{platform}-nfr-{slug}` | `cpt-superapp-nfr-performance` |
-| Platform Actor | `cpt-{platform}-actor-{slug}` | `cpt-superapp-actor-student` |
-| SubApp FR | `cpt-{subapp}-fr-{slug}` | `cpt-student-fr-notifications` |
-| Epic FR | `cpt-{subapp}-epic-{epic}-fr-{slug}` | `cpt-student-epic-home-fr-badge` |
+### Platform Level (L0)
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| PRD | `cpt-{platform}-prd` | `cpt-superapp-prd` |
+| FR | `cpt-{platform}-fr-{slug}` | `cpt-superapp-fr-offline-support` |
+| NFR | `cpt-{platform}-nfr-{slug}` | `cpt-superapp-nfr-performance` |
+| Actor | `cpt-{platform}-actor-{slug}` | `cpt-superapp-actor-student` |
+| Component | `cpt-{platform}-component-{slug}` | `cpt-superapp-component-auth-kernel` |
+
+### SubApp Level (L1)
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| PRD | `cpt-{subapp}-prd` | `cpt-student-prd` |
+| FR | `cpt-{subapp}-fr-{slug}` | `cpt-student-fr-notifications` |
+| NFR | `cpt-{subapp}-nfr-{slug}` | `cpt-student-nfr-offline-content` |
+| Component | `cpt-{subapp}-component-{slug}` | `cpt-student-component-kmp-domain` |
+| Epic | `cpt-{subapp}-epic-{slug}` | `cpt-student-epic-home` |
+
+### Epic Level (L2)
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| PRD | `cpt-{subapp}-epic-{epic}-prd` | `cpt-student-epic-home-prd` |
+| FR | `cpt-{subapp}-epic-{epic}-fr-{slug}` | `cpt-student-epic-home-fr-badge` |
+| Screen | `cpt-{subapp}-{epic}-screen-{slug}` | `cpt-student-home-screen-main` |
+| Widget | `cpt-{subapp}-{epic}-widget-{slug}` | `cpt-student-home-widget-streak` |
+| State | `cpt-{subapp}-{epic}-state` | `cpt-student-home-state` |
+
+### Feature Level (L3)
+
+| Type | Pattern | Example |
+|------|---------|---------|
 | Feature | `cpt-{subapp}-feature-{slug}` | `cpt-student-feature-daily-goal` |
+| Flow | `cpt-{subapp}-flow-{feature}-{slug}` | `cpt-student-flow-daily-goal-main` |
 | DOD | `cpt-{subapp}-dod-{feature}-{slug}` | `cpt-student-dod-daily-goal-display` |
+
+### Implementation Level
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| KMP | `cpt-kmp-{module}-{type}-{slug}` | `cpt-kmp-home-usecase-load` |
+| Android | `cpt-android-{module}-{type}-{slug}` | `cpt-android-home-screen-main` |
+| iOS | `cpt-ios-{module}-{type}-{slug}` | `cpt-ios-home-view-main` |
 | Code Marker | `@cpt-impl:{feature-id}` | `@cpt-impl:cpt-student-feature-daily-goal` |
 
 ---
