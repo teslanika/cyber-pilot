@@ -107,6 +107,7 @@ cpt-superapp-fr-inapp-notifications
 
 | Template | Level | Description |
 |----------|-------|-------------|
+| **SDLC PRD** | L0 | Platform requirements (uses standard SDLC kit template) |
 | **PRD-SUBAPP** | L1 | SubApp requirements with "Traces To Platform" table |
 | **PRD-EPIC** | L2 | Epic requirements with "Traces To SubApp" table |
 
