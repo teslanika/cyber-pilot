@@ -1,0 +1,491 @@
+# Mobile SuperApp Kit Constraints
+# Defines ID kinds, traceability rules, and validation constraints
+#
+# KEY FEATURE: Multi-level requirement traceability
+# Platform FR → SubApp FR → Epic FR → Feature → Code
+#
+# This kit extends SDLC kit with mobile-specific hierarchy
+
+[kit]
+name = "mobile-superapp"
+version = 2
+description = "Documentation kit for Mobile SuperApp with multi-level hierarchy and cascading requirement traceability"
+extends = "sdlc"  # Inherit PRD, ADR, FEATURE base definitions
+
+# ============================================================================
+# IDENTIFIER DEFINITIONS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# PLATFORM LEVEL (L0)
+# ----------------------------------------------------------------------------
+
+[identifiers.platform-prd]
+pattern = "cpt-{platform}-prd"
+defined_in = ["architecture/PRD.md"]
+example = "cpt-superapp-prd"
+
+[identifiers.platform-fr]
+pattern = "cpt-{platform}-fr-{slug}"
+defined_in = ["architecture/PRD.md"]
+example = "cpt-superapp-fr-offline-support"
+# Platform FR can be referenced in:
+# - Platform DESIGN (how it's realized)
+# - Platform DECOMPOSITION (which SubApp covers it)
+# - SubApp PRD (refined into SubApp-level FR)
+referenced_in = ["architecture/DESIGN.md", "architecture/DECOMPOSITION.md", "subapps/*/PRD.md"]
+
+# Platform FR → SubApp FR traceability
+[identifiers.platform-fr.references.subapp-prd]
+relation = "refined-by"
+description = "Platform FR is refined into SubApp-specific FRs"
+coverage = true  # Every Platform FR should be refined
+
+[identifiers.platform-nfr]
+pattern = "cpt-{platform}-nfr-{slug}"
+defined_in = ["architecture/PRD.md"]
+referenced_in = ["architecture/DESIGN.md", "subapps/*/PRD.md"]
+example = "cpt-superapp-nfr-performance"
+
+# Platform NFR → SubApp NFR traceability
+[identifiers.platform-nfr.references.subapp-prd]
+relation = "refined-by"
+description = "Platform NFR is refined/inherited by SubApp NFRs"
+coverage = false  # Not all NFRs need SubApp refinement
+
+[identifiers.platform-actor]
+pattern = "cpt-{platform}-actor-{slug}"
+defined_in = ["architecture/PRD.md"]
+# Actors are SHARED across all levels - not redefined, just referenced
+referenced_in = ["architecture/DESIGN.md", "subapps/*/PRD.md", "subapps/*/DESIGN.md", "subapps/*/*/*/PRD.md", "subapps/*/*/*/features/*/FEATURE.md"]
+example = "cpt-superapp-actor-student"
+
+# Platform DESIGN identifiers
+[identifiers.platform-layer]
+pattern = "cpt-{platform}-layer-{slug}"
+defined_in = ["DESIGN-PLATFORM.md"]
+example = "cpt-superapp-layer-presentation"
+
+[identifiers.platform-principle]
+pattern = "cpt-{platform}-principle-{slug}"
+defined_in = ["DESIGN-PLATFORM.md"]
+referenced_in = ["DESIGN-SUBAPP.md", "ADR.md"]
+example = "cpt-superapp-principle-hybrid"
+
+[identifiers.platform-component]
+pattern = "cpt-{platform}-component-{slug}"
+defined_in = ["DESIGN-PLATFORM.md"]
+referenced_in = ["DECOMPOSITION-PLATFORM.md", "DESIGN-SUBAPP.md"]
+example = "cpt-superapp-component-auth-kernel"
+
+[identifiers.platform-integration]
+pattern = "cpt-{platform}-integration-{slug}"
+defined_in = ["DESIGN-PLATFORM.md"]
+referenced_in = ["DECOMPOSITION-PLATFORM.md", "DESIGN-SUBAPP.md"]
+example = "cpt-superapp-integration-learn"
+
+[identifiers.platform-adr]
+pattern = "cpt-{platform}-adr-{slug}"
+defined_in = ["adr/*.md"]
+referenced_in = ["DESIGN-PLATFORM.md", "DESIGN-SUBAPP.md"]
+example = "cpt-superapp-adr-hybrid-approach"
+
+# Platform DECOMPOSITION identifiers
+[identifiers.platform-subapp]
+pattern = "cpt-{platform}-subapp-{slug}"
+defined_in = ["DECOMPOSITION-PLATFORM.md"]
+referenced_in = ["subapps/{subapp}/PRD.md"]
+example = "cpt-superapp-subapp-student"
+
+[identifiers.platform-status]
+pattern = "cpt-{platform}-status-overall"
+defined_in = ["DECOMPOSITION-PLATFORM.md"]
+example = "cpt-superapp-status-overall"
+
+# ----------------------------------------------------------------------------
+# SUBAPP LEVEL (L1)
+# ----------------------------------------------------------------------------
+
+[identifiers.subapp-prd]
+pattern = "cpt-{subapp}-prd"
+defined_in = ["subapps/{subapp}/PRD.md"]
+example = "cpt-student-prd"
+# SubApp PRD traces up to Platform PRD
+[identifiers.subapp-prd.references.platform-prd]
+relation = "refines"
+description = "SubApp PRD refines Platform PRD for specific SubApp scope"
+
+[identifiers.subapp-fr]
+pattern = "cpt-{subapp}-fr-{slug}"
+defined_in = ["subapps/{subapp}/PRD.md"]
+example = "cpt-student-fr-course-catalog"
+# SubApp FR can be referenced in:
+# - SubApp DESIGN (how it's realized at SubApp level)
+# - SubApp DECOMPOSITION (which Epic covers it)
+# - Epic PRD (detailed into Epic-level FR)
+referenced_in = ["subapps/{subapp}/DESIGN.md", "subapps/{subapp}/DECOMPOSITION.md", "subapps/{subapp}/*/*/PRD.md"]
+
+# SubApp FR traces UP to Platform FR
+[identifiers.subapp-fr.references.platform-fr]
+relation = "refines"
+description = "SubApp FR refines a Platform FR"
+coverage = false  # Not all SubApp FRs trace to Platform (can be SubApp-specific)
+
+# SubApp FR traces DOWN to Epic FR
+[identifiers.subapp-fr.references.epic-fr]
+relation = "detailed-by"
+description = "SubApp FR is detailed into Epic-specific FRs"
+coverage = true  # Every SubApp FR should be detailed in some Epic
+
+[identifiers.subapp-component]
+pattern = "cpt-{subapp}-component-{slug}"
+defined_in = ["DESIGN-SUBAPP.md"]
+referenced_in = ["DECOMPOSITION-SUBAPP.md", "DESIGN-EPIC.md"]
+example = "cpt-student-component-kmp-domain"
+
+[identifiers.subapp-adr]
+pattern = "cpt-{subapp}-adr-{slug}"
+defined_in = ["subapps/{subapp}/adr/*.md"]
+referenced_in = ["DESIGN-SUBAPP.md", "DESIGN-EPIC.md"]
+example = "cpt-student-adr-navigation"
+
+[identifiers.subapp-epic]
+pattern = "cpt-{subapp}-epic-{slug}"
+defined_in = ["DECOMPOSITION-SUBAPP.md"]
+referenced_in = ["subapps/{subapp}/screens/{epic}/PRD.md", "DESIGN-EPIC.md"]
+example = "cpt-student-epic-home"
+
+[identifiers.subapp-status]
+pattern = "cpt-{subapp}-status-overall"
+defined_in = ["DECOMPOSITION-SUBAPP.md"]
+example = "cpt-student-status-overall"
+
+# ----------------------------------------------------------------------------
+# EPIC LEVEL (L2)
+# ----------------------------------------------------------------------------
+
+[identifiers.epic-fr]
+pattern = "cpt-{subapp}-epic-{epic}-fr-{slug}"
+defined_in = ["subapps/{subapp}/*/{epic}/PRD.md"]
+example = "cpt-student-epic-home-fr-daily-goal"
+# Epic FR can be referenced in:
+# - Epic DESIGN (how it's realized)
+# - Epic DECOMPOSITION (which Feature covers it)
+# - Feature (implemented by)
+referenced_in = ["subapps/{subapp}/*/{epic}/DESIGN.md", "subapps/{subapp}/*/{epic}/DECOMPOSITION.md", "subapps/{subapp}/*/{epic}/features/*/FEATURE.md"]
+
+# Epic FR traces UP to SubApp FR
+[identifiers.epic-fr.references.subapp-fr]
+relation = "details"
+description = "Epic FR details a SubApp FR for specific screen/flow"
+coverage = false  # Not all Epic FRs trace to SubApp (can be Epic-specific)
+
+# Epic FR traces DOWN to Feature
+[identifiers.epic-fr.references.feature]
+relation = "specified-by"
+description = "Epic FR is specified in a Feature document"
+coverage = true  # Every Epic FR should be covered by a Feature
+
+[identifiers.epic-component]
+pattern = "cpt-{subapp}-{epic}-component-{slug}"
+defined_in = ["DESIGN-EPIC.md"]
+referenced_in = ["DECOMPOSITION-EPIC.md", "FEATURE-MOBILE.md"]
+example = "cpt-student-home-component-overview"
+
+[identifiers.epic-screen]
+pattern = "cpt-{subapp}-{epic}-screen-{slug}"
+defined_in = ["DESIGN-EPIC.md"]
+referenced_in = ["DECOMPOSITION-EPIC.md", "FEATURE-MOBILE.md"]
+example = "cpt-student-home-screen-main"
+
+[identifiers.epic-widget]
+pattern = "cpt-{subapp}-{epic}-widget-{slug}"
+defined_in = ["DESIGN-EPIC.md"]
+referenced_in = ["DECOMPOSITION-EPIC.md", "FEATURE-MOBILE.md"]
+example = "cpt-student-home-widget-streak"
+
+[identifiers.epic-state]
+pattern = "cpt-{subapp}-{epic}-state"
+defined_in = ["DESIGN-EPIC.md"]
+referenced_in = ["FEATURE-MOBILE.md"]
+example = "cpt-student-home-state"
+
+[identifiers.epic-usecase]
+pattern = "cpt-{subapp}-{epic}-usecase-{slug}"
+defined_in = ["DESIGN-EPIC.md"]
+referenced_in = ["DECOMPOSITION-EPIC.md", "FEATURE-MOBILE.md"]
+example = "cpt-student-home-usecase-load-data"
+
+[identifiers.epic-status]
+pattern = "cpt-{subapp}-{epic}-status-overall"
+defined_in = ["DECOMPOSITION-EPIC.md"]
+example = "cpt-student-home-status-overall"
+
+# ----------------------------------------------------------------------------
+# FEATURE LEVEL (L3)
+# ----------------------------------------------------------------------------
+
+[identifiers.feature]
+pattern = "cpt-{subapp}-feature-{slug}"
+defined_in = ["subapps/{subapp}/*/{epic}/DECOMPOSITION.md"]
+example = "cpt-student-feature-daily-goal"
+# Feature is referenced in:
+# - FEATURE document (detailed specification)
+# - IMPL documents (implementation reference)
+referenced_in = ["subapps/{subapp}/*/{epic}/features/{feature}/FEATURE.md", "constructor-sdk/feature/*/IMPL.md", "android-app/feature/*/IMPL.md", "ios-app/Features/*/IMPL.md"]
+
+# Feature traces UP to Epic FR
+[identifiers.feature.references.epic-fr]
+relation = "implements"
+description = "Feature implements one or more Epic FRs"
+coverage = true  # Every Feature should implement at least one FR
+
+# Feature traces DOWN to Code
+[identifiers.feature.references.impl]
+relation = "implemented-by"
+description = "Feature is implemented in code with @cpt-impl markers"
+coverage = true  # Every Feature should have implementations
+
+[identifiers.feature-status]
+pattern = "cpt-{subapp}-featstatus-{slug}"
+defined_in = ["FEATURE-MOBILE.md"]
+example = "cpt-student-featstatus-daily-goal"
+
+[identifiers.flow]
+pattern = "cpt-{subapp}-flow-{feature}-{slug}"
+defined_in = ["FEATURE-MOBILE.md"]
+referenced_in = ["IMPL-KMP.md", "IMPL-ANDROID.md", "IMPL-IOS.md"]
+example = "cpt-student-flow-daily-goal-main"
+
+[identifiers.algo]
+pattern = "cpt-{subapp}-algo-{feature}-{slug}"
+defined_in = ["FEATURE-MOBILE.md"]
+referenced_in = ["IMPL-KMP.md", "IMPL-ANDROID.md", "IMPL-IOS.md"]
+example = "cpt-student-algo-daily-goal-kmp"
+
+[identifiers.state]
+pattern = "cpt-{subapp}-state-{feature}"
+defined_in = ["FEATURE-MOBILE.md"]
+example = "cpt-student-state-daily-goal"
+
+[identifiers.dod]
+pattern = "cpt-{subapp}-dod-{feature}-{slug}"
+defined_in = ["FEATURE-MOBILE.md"]
+example = "cpt-student-dod-daily-goal-display"
+
+# Implementation identifiers
+[identifiers.impl-kmp]
+pattern = "cpt-kmp-{module}-{type}-{slug}"
+defined_in = ["IMPL-KMP.md", "code"]
+example = "cpt-kmp-home-usecase-load"
+
+[identifiers.impl-android]
+pattern = "cpt-android-{module}-{type}-{slug}"
+defined_in = ["IMPL-ANDROID.md", "code"]
+example = "cpt-android-home-screen-main"
+
+[identifiers.impl-ios]
+pattern = "cpt-ios-{module}-{type}-{slug}"
+defined_in = ["IMPL-IOS.md", "code"]
+example = "cpt-ios-home-view-main"
+
+# ============================================================================
+# TRACEABILITY RULES
+# ============================================================================
+# 
+# CASCADING REQUIREMENT TRACEABILITY:
+#
+#   Platform PRD (cpt-superapp-fr-*)
+#        ↓ refined-by
+#   SubApp PRD (cpt-student-fr-*)
+#        ↓ detailed-by
+#   Epic PRD (cpt-student-epic-home-fr-*)
+#        ↓ specified-by
+#   FEATURE (cpt-student-feature-*)
+#        ↓ implemented-by
+#   Code (@cpt-impl markers)
+#
+# Each FR at lower level MUST reference parent FR via "Traces To" table
+# ============================================================================
+
+[traceability]
+
+# --- DOCUMENT-LEVEL TRACEABILITY ---
+
+# Platform level
+"architecture/PRD.md" = { 
+    traces_from = [], 
+    traces_to = ["architecture/DESIGN.md", "architecture/DECOMPOSITION.md", "subapps/*/PRD.md"] 
+}
+"architecture/DESIGN.md" = { 
+    traces_from = ["architecture/PRD.md"], 
+    traces_to = ["architecture/DECOMPOSITION.md", "subapps/*/DESIGN.md"] 
+}
+"architecture/DECOMPOSITION.md" = { 
+    traces_from = ["architecture/DESIGN.md"], 
+    traces_to = ["subapps/*/PRD.md"] 
+}
+
+# SubApp level
+"subapps/*/PRD.md" = { 
+    traces_from = ["architecture/PRD.md", "architecture/DECOMPOSITION.md"], 
+    traces_to = ["subapps/*/DESIGN.md", "subapps/*/DECOMPOSITION.md", "subapps/*/*/*/PRD.md"] 
+}
+"subapps/*/DESIGN.md" = { 
+    traces_from = ["architecture/DESIGN.md", "subapps/*/PRD.md"], 
+    traces_to = ["subapps/*/DECOMPOSITION.md", "subapps/*/*/*/DESIGN.md"] 
+}
+"subapps/*/DECOMPOSITION.md" = { 
+    traces_from = ["subapps/*/DESIGN.md"], 
+    traces_to = ["subapps/*/*/*/PRD.md"] 
+}
+
+# Epic level
+"subapps/*/*/*/PRD.md" = { 
+    traces_from = ["subapps/*/PRD.md", "subapps/*/DECOMPOSITION.md"], 
+    traces_to = ["subapps/*/*/*/DESIGN.md", "subapps/*/*/*/DECOMPOSITION.md"] 
+}
+"subapps/*/*/*/DESIGN.md" = { 
+    traces_from = ["subapps/*/DESIGN.md", "subapps/*/*/*/PRD.md"], 
+    traces_to = ["subapps/*/*/*/DECOMPOSITION.md", "subapps/*/*/*/features/*/FEATURE.md"] 
+}
+"subapps/*/*/*/DECOMPOSITION.md" = { 
+    traces_from = ["subapps/*/*/*/DESIGN.md"], 
+    traces_to = ["subapps/*/*/*/features/*/FEATURE.md"] 
+}
+
+# Feature level
+"subapps/*/*/*/features/*/FEATURE.md" = { 
+    traces_from = ["subapps/*/*/*/DECOMPOSITION.md", "subapps/*/*/*/DESIGN.md"], 
+    traces_to = ["constructor-sdk/feature/*/IMPL.md", "android-app/feature/*/IMPL.md", "ios-app/Features/*/IMPL.md", "code"] 
+}
+
+# Implementation level
+"constructor-sdk/feature/*/IMPL.md" = { traces_from = ["subapps/*/*/*/features/*/FEATURE.md"], traces_to = ["code"] }
+"android-app/feature/*/IMPL.md" = { traces_from = ["subapps/*/*/*/features/*/FEATURE.md"], traces_to = ["code"] }
+"ios-app/Features/*/IMPL.md" = { traces_from = ["subapps/*/*/*/features/*/FEATURE.md"], traces_to = ["code"] }
+
+# --- REQUIREMENT-LEVEL TRACEABILITY (FR Cascade) ---
+
+[traceability.requirements]
+# This section defines how FRs cascade through levels
+
+[[traceability.requirements.cascade]]
+name = "Platform → SubApp"
+parent_pattern = "cpt-{platform}-fr-{slug}"
+child_pattern = "cpt-{subapp}-fr-{slug}"
+relation = "refined-by"
+required = true
+description = "Platform FR must be refined by at least one SubApp FR"
+
+[[traceability.requirements.cascade]]
+name = "SubApp → Epic"
+parent_pattern = "cpt-{subapp}-fr-{slug}"
+child_pattern = "cpt-{subapp}-epic-{epic}-fr-{slug}"
+relation = "detailed-by"
+required = true
+description = "SubApp FR must be detailed by at least one Epic FR"
+
+[[traceability.requirements.cascade]]
+name = "Epic → Feature"
+parent_pattern = "cpt-{subapp}-epic-{epic}-fr-{slug}"
+child_pattern = "cpt-{subapp}-feature-{slug}"
+relation = "specified-by"
+required = true
+description = "Epic FR must be specified in at least one Feature"
+
+[[traceability.requirements.cascade]]
+name = "Feature → Code"
+parent_pattern = "cpt-{subapp}-feature-{slug}"
+child_pattern = "@cpt-impl:{feature-id}"
+relation = "implemented-by"
+required = true
+description = "Feature must have code implementations with @cpt-impl markers"
+
+# ============================================================================
+# VALIDATION CONSTRAINTS
+# ============================================================================
+
+[validation]
+
+# --- CHECKBOX CASCADE RULES ---
+require_checked_parent_for_checked_child = true
+
+# --- COVERAGE REQUIREMENTS ---
+minimum_coverage_percent = 80
+
+# --- CROSS-REFERENCE REQUIREMENTS ---
+require_all_fr_traced_to_design = true
+require_all_design_components_in_decomposition = true
+require_all_features_have_impl = true
+
+# --- CASCADING REQUIREMENT VALIDATION ---
+# These rules ensure proper FR traceability through all levels
+
+[[validation.rules]]
+id = "platform-fr-coverage"
+description = "Every Platform FR must be refined by at least one SubApp FR"
+source = "architecture/PRD.md"
+source_pattern = "cpt-{platform}-fr-*"
+target = "subapps/*/PRD.md"
+target_pattern = "cpt-{subapp}-fr-*"
+relation = "refined-by"
+severity = "error"
+
+[[validation.rules]]
+id = "subapp-fr-coverage"
+description = "Every SubApp FR must be detailed by at least one Epic FR"
+source = "subapps/*/PRD.md"
+source_pattern = "cpt-{subapp}-fr-*"
+target = "subapps/*/*/*/PRD.md"
+target_pattern = "cpt-{subapp}-epic-{epic}-fr-*"
+relation = "detailed-by"
+severity = "error"
+
+[[validation.rules]]
+id = "epic-fr-coverage"
+description = "Every Epic FR must be specified in at least one Feature"
+source = "subapps/*/*/*/PRD.md"
+source_pattern = "cpt-{subapp}-epic-{epic}-fr-*"
+target = "subapps/*/*/*/features/*/FEATURE.md"
+target_pattern = "cpt-{subapp}-feature-*"
+relation = "specified-by"
+severity = "error"
+
+[[validation.rules]]
+id = "feature-impl-coverage"
+description = "Every Feature must have @cpt-impl markers in code"
+source = "subapps/*/*/*/features/*/FEATURE.md"
+source_pattern = "cpt-{subapp}-feature-*"
+target = "code"
+target_pattern = "@cpt-impl:cpt-{subapp}-feature-*"
+relation = "implemented-by"
+severity = "warning"  # Warning for MVP, error for release
+
+[[validation.rules]]
+id = "child-fr-traces-parent"
+description = "Child FR must explicitly reference parent FR in Traces To table"
+check_type = "reference-exists"
+child_patterns = ["cpt-{subapp}-fr-*", "cpt-{subapp}-epic-{epic}-fr-*"]
+parent_patterns = ["cpt-{platform}-fr-*", "cpt-{subapp}-fr-*"]
+severity = "warning"
+
+# --- ORPHAN DETECTION ---
+
+[[validation.rules]]
+id = "no-orphan-subapp-fr"
+description = "SubApp-specific FR (not tracing to Platform) must be documented"
+check_type = "orphan-warning"
+pattern = "cpt-{subapp}-fr-*"
+expected_parent = "cpt-{platform}-fr-*"
+allow_orphan_if_tagged = ["subapp-specific", "local-requirement"]
+severity = "info"
+
+[[validation.rules]]
+id = "no-orphan-epic-fr"
+description = "Epic-specific FR (not tracing to SubApp) must be documented"
+check_type = "orphan-warning"
+pattern = "cpt-{subapp}-epic-{epic}-fr-*"
+expected_parent = "cpt-{subapp}-fr-*"
+allow_orphan_if_tagged = ["epic-specific", "local-requirement"]
+severity = "info"

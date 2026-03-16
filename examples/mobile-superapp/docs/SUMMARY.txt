@@ -1,0 +1,82 @@
+MOBILE SUPERAPP KIT — SUMMARY
+=============================
+
+What: Custom Cypilot kit for Constructor Mobile SuperApp documentation
+
+Why: Standard SDLC kit supports only one level (system → features).
+     Mobile SuperApp needs 4 levels: Platform → SubApp → Epic → Feature
+
+Key Features:
+-------------
+
+1. MULTI-LEVEL HIERARCHY
+   - L0: Platform (shared kernel — auth, push, deep links)
+   - L1: SubApp (Student, Proctor, Groups)
+   - L2: Epic (screens, capabilities, flows)
+   - L3: Feature (CDSL specifications)
+
+2. CASCADING TRACEABILITY
+   Platform FR → SubApp FR → Epic FR → Feature → Code
+   
+   Example:
+   cpt-superapp-fr-inapp-notifications (Platform)
+       ↓ refined-by
+   cpt-student-fr-notifications (SubApp)
+       ↓ detailed-by
+   cpt-student-epic-notification-history-fr-badge (Epic)
+       ↓ specified-by
+   cpt-student-feature-notification-badge (Feature)
+       ↓ implemented-by
+   @cpt-impl:cpt-student-feature-notification-badge (Code)
+
+3. TEMPLATES (15 total)
+   PRD: PRD-SUBAPP.md, PRD-EPIC.md
+   DESIGN: DESIGN-PLATFORM.md, DESIGN-SUBAPP.md, DESIGN-EPIC.md
+   DECOMPOSITION: DECOMPOSITION-PLATFORM/SUBAPP/EPIC.md
+   IMPL: FEATURE-MOBILE.md, IMPL-KMP.md, IMPL-ANDROID.md, IMPL-IOS.md
+
+4. VALIDATION RULES
+   - platform-fr-coverage: Every Platform FR → SubApp FR
+   - subapp-fr-coverage: Every SubApp FR → Epic FR
+   - epic-fr-coverage: Every Epic FR → Feature
+   - feature-impl-coverage: Every Feature → Code
+
+Files Created:
+--------------
+cypilot/kits/mobile-superapp/
+├── README.md              — Quick start guide
+├── SKILL.md               — Kit capabilities
+├── AGENTS.md              — Agent navigation rules
+├── INSTALL.md             — Installation instructions
+├── install.sh             — Install script
+├── uninstall.sh           — Uninstall script
+├── constraints.toml       — Traceability rules (492 lines)
+├── blueprints/            — 12 templates
+└── docs/
+    ├── TRACEABILITY.md    — How traceability works
+    ├── DESCRIPTION.md     — Detailed description (RU)
+    ├── presentation.html  — Interactive HTML presentation
+    └── SUMMARY.txt        — This file
+
+Documentation Structure Created:
+--------------------------------
+architecture/
+├── PRD.md                 — Platform PRD (separated from Student)
+└── subapps/student/
+    ├── PRD.md             — Student SubApp PRD
+    └── capabilities/notification-history/
+        └── PRD.md         — Notification History Epic PRD
+
+Installation:
+-------------
+cd mobile-superapp
+./cypilot/kits/mobile-superapp/install.sh
+
+Rollback:
+---------
+./cypilot/kits/mobile-superapp/uninstall.sh
+
+---
+Version: 2.0
+Date: March 2026
+Author: Constructor Mobile Team
