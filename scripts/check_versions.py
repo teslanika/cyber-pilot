@@ -81,25 +81,17 @@ def _extract_version_from_content(content: str) -> str | None:
 
 
 def check_proxy_sync(root: Path) -> list[str]:
-    """Check that proxy __version__ matches pyproject.toml version."""
+    """Check that pyproject.toml has a valid version.
+
+    Note: proxy __version__ now uses importlib.metadata.version() at runtime,
+    so we only need to verify pyproject.toml has a version.
+    """
     errors: list[str] = []
 
-    proxy_version = _read_py_version(root / "src" / "cypilot_proxy" / "__init__.py")
     toml_version = _read_toml_version(root / "pyproject.toml")
 
-    if proxy_version is None:
-        errors.append("Cannot read version from src/cypilot_proxy/__init__.py")
-        return errors
     if toml_version is None:
         errors.append("Cannot read version from pyproject.toml")
-        return errors
-
-    if _normalize_version(proxy_version) != _normalize_version(toml_version):
-        errors.append(
-            f"Proxy version mismatch: "
-            f"src/cypilot_proxy/__init__.py={proxy_version} "
-            f"≠ pyproject.toml={toml_version}"
-        )
 
     return errors
 

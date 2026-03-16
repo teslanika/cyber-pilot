@@ -103,8 +103,7 @@ Cypilot has **two independent version tracks**.
 | File | Example | What it versions | When to bump |
 |------|---------|------------------|--------------|
 | `skills/cypilot/scripts/cypilot/__init__.py` | `v3.0.6-beta` | **Skill engine** — the core validation/generation logic | Any change to skill engine code |
-| `src/cypilot_proxy/__init__.py` | `v3.0.2-beta` | **CLI proxy** — the thin routing shell | Changes to proxy routing, caching, or resolution |
-| `pyproject.toml` (`version`) | `3.0.2-beta` | **PyPI package** — installed via `pipx` | Must match `src/cypilot_proxy/__init__.py` (without `v` prefix) |
+| `pyproject.toml` (`version`) | `3.0.9-beta` | **CLI proxy** — installed via `pipx` | Changes to proxy routing, caching, or resolution |
 
 ### Releasing a New Version
 
@@ -119,14 +118,10 @@ Cypilot has **two independent version tracks**.
    __version__ = "v3.0.6-beta"
    ```
 
-3. **If proxy changed**, bump both proxy files **in sync**:
-   ```python
-   # src/cypilot_proxy/__init__.py
-   __version__ = "v3.0.6-beta"
-   ```
+3. **If proxy changed**, bump version in `pyproject.toml`:
    ```toml
    # pyproject.toml
-   version = "3.0.6-beta"   # same value, no 'v' prefix
+   version = "3.0.9-beta"
    ```
 
 4. **Sync bootstrap**:

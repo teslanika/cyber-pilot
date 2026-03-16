@@ -11,6 +11,7 @@ Uses only Python stdlib (urllib.request) — no third-party dependencies.
 # @cpt-begin:cpt-cypilot-algo-core-infra-cache-skill:p1:inst-cache-helpers
 import io
 import json
+import os
 import shutil
 import sys
 import tarfile
@@ -27,6 +28,40 @@ GITHUB_OWNER = "cyberfabric"
 GITHUB_REPO = "cyber-pilot"
 GITHUB_API_BASE = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
 USER_AGENT = "cypilot-proxy/3.0"
+
+
+def _patch_cached_version(cache_dir: Path, version: str) -> None:
+    """Patch __version__ in cached skill's __init__.py with the resolved version."""
+    init_file = cache_dir / "skills" / "cypilot" / "scripts" / "cypilot" / "__init__.py"
+    if not init_file.is_file():
+        return
+    try:
+        content = init_file.read_text(encoding="utf-8")
+        lines = content.splitlines(keepends=True)
+        patched = False
+        for i, line in enumerate(lines):
+            if line.startswith("__version__") and "=" in line:
+                lines[i] = f'__version__ = "{version}"\n'
+                patched = True
+                break
+        if patched:
+            init_file.write_text("".join(lines), encoding="utf-8")
+    except OSError:
+        pass  # Non-critical, version file is the source of truth
+
+
+def _get_github_headers() -> dict:
+    """Build GitHub API request headers, including auth token if available."""
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": USER_AGENT,
+    }
+    # Support GITHUB_TOKEN or GH_TOKEN (gh CLI convention)
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
 
 def _resolve_api_base(url: str) -> str:
     """
@@ -65,14 +100,27 @@ def resolve_latest_version(
     # inst-resolve-version
     base = api_base or GITHUB_API_BASE
     url = f"{base}/releases/latest"
-    req = Request(url, headers={
-        "Accept": "application/vnd.github+json",
-        "User-Agent": USER_AGENT,
-    })
+    req = Request(url, headers=_get_github_headers())
     try:
         with urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-    except (HTTPError, URLError, json.JSONDecodeError, OSError):
+    except HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        sys.stderr.write(f"GitHub API error: HTTP {e.code} — {e.reason}\n")
+        if body:
+            try:
+                err_data = json.loads(body)
+                if "message" in err_data:
+                    sys.stderr.write(f"  {err_data['message']}\n")
+            except json.JSONDecodeError:
+                sys.stderr.write(f"  {body[:200]}\n")
+        return None, None
+    except (URLError, json.JSONDecodeError, OSError) as e:
+        sys.stderr.write(f"GitHub API error: {e}\n")
         return None, None
 
     tag = data.get("tag_name")
@@ -204,10 +252,7 @@ def download_and_cache(
         return False, f"No download URL found for version {resolved_version}"
 
     # @cpt-begin:cpt-cypilot-algo-core-infra-cache-skill:p1:inst-download-archive
-    req = Request(asset_url, headers={
-        "Accept": "application/vnd.github+json",
-        "User-Agent": USER_AGENT,
-    })
+    req = Request(asset_url, headers=_get_github_headers())
     try:
         with urlopen(req, timeout=120) as resp:
             archive_data = resp.read()
@@ -261,6 +306,9 @@ def download_and_cache(
     if not extracted:
         return False, "Failed to extract archive: unrecognized format"
     # @cpt-end:cpt-cypilot-algo-core-infra-cache-skill:p1:inst-extract-archive
+
+    # Patch __version__ in cached skill's __init__.py with resolved version
+    _patch_cached_version(cache_dir, resolved_version)
 
     # @cpt-begin:cpt-cypilot-algo-core-infra-cache-skill:p1:inst-write-version
     version_file.write_text(resolved_version, encoding="utf-8")

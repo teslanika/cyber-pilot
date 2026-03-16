@@ -1996,8 +1996,8 @@ class TestWriteStandalone:
             assert out.is_file()
 
     def test_write_error(self):
-
-        exit_code, data = _write_standalone(Path("/nonexistent/dir/ws.toml"), {"sources": {}})
+        # Use /dev/null as parent — cannot create files inside it on any OS
+        exit_code, data = _write_standalone(Path("/dev/null/ws.toml"), {"sources": {}})
         assert exit_code == 1
         assert data["status"] == "ERROR"
 

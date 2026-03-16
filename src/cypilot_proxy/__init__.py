@@ -7,4 +7,6 @@ and forwards commands. Installable via pipx.
 @cpt-dod:cpt-cypilot-dod-core-infra-global-package:p1
 """
 
-__version__ = "v3.0.8-beta"
+from importlib.metadata import version
+
+__version__ = version("cypilot")
