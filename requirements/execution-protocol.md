@@ -130,7 +130,7 @@ Available kits:
 ### Discover Cypilot
 
 ```bash
-python3 {cypilot_path}/.core/skills/cypilot/scripts/cypilot.py --json info --root {PROJECT_ROOT} --cypilot-root {cypilot_path}
+cpt info --json --root {PROJECT_ROOT} --cypilot-root {cypilot_path}
 ```
 
 Parse JSON output: `status`, `cypilot_dir`, `project_root`, `specs`, `rules`, `variables`.

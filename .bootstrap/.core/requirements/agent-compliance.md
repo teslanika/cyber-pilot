@@ -88,7 +88,7 @@ Agent MUST structure validation output with these six sections:
 |---|---|
 | **1. Protocol Compliance** | Rules Mode: STRICT (`cypilot-sdlc`); Artifact Read: `{path}` (`{N}` lines); Checklist Loaded: `{path}` (`{N}` lines) |
 | **2. Deterministic Gate** | Status: PASS/FAIL; Errors: `{list if any}` |
-| **3. Semantic Review (MANDATORY)** | `Checklist Progress` table with `{ID} | PASS/FAIL/N/A | {quote or violation description}` for each category; `Categories Summary` with Total, PASS, FAIL, N/A (explicit), N/A (missing statement) → VIOLATIONS |
+| **3. Semantic Review (MANDATORY)** | `Checklist Progress` table with `{ID} \| PASS/FAIL/N/A \| {quote or violation description}` for each category; `Categories Summary` with Total, PASS, FAIL, N/A (explicit), N/A (missing statement) → VIOLATIONS |
 | **4. Agent Self-Test** | Answers to all 6 self-test questions with evidence |
 | **5. Final Status** | Deterministic: PASS/FAIL; Semantic: PASS/FAIL (`{N}` issues); Overall: PASS/FAIL |
 | **6. Issues (if any)** | Detailed issue descriptions |
