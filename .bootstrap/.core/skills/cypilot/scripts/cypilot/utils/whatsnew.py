@@ -1,0 +1,261 @@
+"""
+Whatsnew Display Utilities
+
+Shared helpers for displaying whatsnew entries from whatsnew.toml files.
+Used by both `cpt update` (core) and `cpt kit update` (kit).
+"""
+
+import logging
+import re
+import sys
+from pathlib import Path
+from typing import Dict, Tuple
+
+logger = logging.getLogger(__name__)
+
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-whatsnew-version-cmp
+def parse_semver(version: str) -> Tuple[int, int, int]:
+    """Parse semantic version string into tuple (major, minor, patch).
+
+    Handles common formats: "1.2.3", "v1.2.3", "whatsnew.1.2.3".
+    Returns (0, 0, 0) for unparseable versions.
+    """
+    # Strip common prefixes
+    v = version.strip()
+    if v.startswith("whatsnew."):
+        v = v[9:]
+    if v.startswith("v"):
+        v = v[1:]
+
+    parts = v.split(".")
+    try:
+        major = int(parts[0]) if len(parts) > 0 else 0
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        patch = int(parts[2]) if len(parts) > 2 else 0
+        return (major, minor, patch)
+    except (ValueError, IndexError):
+        return (0, 0, 0)
+
+
+def compare_versions(v1: str, v2: str) -> int:
+    """Compare two version strings semantically.
+
+    Returns:
+        -1 if v1 < v2
+         0 if v1 == v2
+         1 if v1 > v2
+    """
+    t1 = parse_semver(v1)
+    t2 = parse_semver(v2)
+    if t1 < t2:
+        return -1
+    elif t1 > t2:
+        return 1
+    return 0
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-whatsnew-version-cmp
+
+
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-whatsnew-format
+def stderr_supports_ansi() -> bool:
+    """Check if stderr supports ANSI escape codes."""
+    return hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+
+
+def format_whatsnew_text(text: str, *, use_ansi: bool) -> str:
+    """Format markdown-like text for terminal display.
+
+    Converts **bold** and `code` to ANSI sequences when use_ansi=True,
+    otherwise strips the markers.
+    """
+    if use_ansi:
+        formatted = re.sub(r"\*\*(.+?)\*\*", r"\033[1m\1\033[0m", text)
+        return re.sub(r"`(.+?)`", r"\033[36m\1\033[0m", formatted)
+    plain = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    return re.sub(r"`(.+?)`", r"\1", plain)
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-whatsnew-format
+
+
+def read_whatsnew(path: Path) -> Dict[str, Dict[str, str]]:
+    """Read a whatsnew.toml file.
+
+    Returns dict mapping version string to {summary, details}.
+    Keys may be in format "whatsnew.X.Y.Z" (from TOML section) or just "X.Y.Z".
+    """
+    if not path.is_file():
+        return {}
+    try:
+        import tomllib
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except Exception as e:
+        logger.debug("Failed to parse %s: %s", path, e)
+        return {}
+
+    result: Dict[str, Dict[str, str]] = {}
+
+    # Handle whatsnew.toml format: [whatsnew."X.Y.Z"]
+    whatsnew_section = data.get("whatsnew", {})
+    if whatsnew_section:
+        for ver, entry in whatsnew_section.items():
+            if isinstance(entry, dict):
+                result[ver] = {
+                    "summary": str(entry.get("summary", "")),
+                    "details": str(entry.get("details", "")),
+                }
+    else:
+        # Fallback: direct version keys (legacy format)
+        for key, entry in data.items():
+            if isinstance(entry, dict):
+                result[key] = {
+                    "summary": str(entry.get("summary", "")),
+                    "details": str(entry.get("details", "")),
+                }
+
+    return result
+
+
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-display-entries
+def _display_whatsnew_entries(
+    entries: list,
+    title: str,
+    *,
+    use_ansi: bool,
+) -> None:
+    """Display whatsnew entries to stderr.
+
+    Args:
+        entries: List of (version, {summary, details}) tuples, sorted ascending.
+        title: Header title (e.g., "What's new in Cypilot" or "What's new in sdlc kit").
+        use_ansi: Whether to use ANSI formatting.
+    """
+    sys.stderr.write(f"\n{'=' * 60}\n")
+    sys.stderr.write(f"  {title}\n")
+    sys.stderr.write(f"{'=' * 60}\n")
+
+    for ver, entry in entries:
+        summary = format_whatsnew_text(entry["summary"], use_ansi=use_ansi)
+        # If summary wasn't changed by formatting, wrap version in bold
+        if use_ansi and summary == entry["summary"]:
+            sys.stderr.write(f"\n  \033[1m{ver}: {entry['summary']}\033[0m\n")
+        else:
+            version_label = f"\033[1m{ver}:\033[0m" if use_ansi else f"{ver}:"
+            sys.stderr.write(f"\n  {version_label} {summary}\n")
+
+        if entry["details"]:
+            for line in entry["details"].splitlines():
+                sys.stderr.write(
+                    f"    {format_whatsnew_text(line, use_ansi=use_ansi)}\n"
+                )
+
+    sys.stderr.write(f"\n{'=' * 60}\n")
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-display-entries
+
+
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-prompt-continue
+def _prompt_continue(interactive: bool) -> bool:
+    """Prompt user to continue or abort.
+
+    Returns True if user acknowledged, False if aborted.
+    Non-interactive mode always returns True.
+    """
+    if not interactive:
+        return True
+
+    sys.stderr.write("  Press Enter to continue with update (or 'q' to abort): ")
+    sys.stderr.flush()
+    try:
+        response = input().strip().lower()
+    except EOFError:
+        return False
+    return response != "q"
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-prompt-continue
+
+
+def show_core_whatsnew(
+    cache_whatsnew: Dict[str, Dict[str, str]],
+    installed_whatsnew: Dict[str, Dict[str, str]],
+    *,
+    interactive: bool = True,
+) -> bool:
+    """Display core whatsnew entries present in cache but missing from installed.
+
+    Used by `cpt update` to show changes between cache and .core/ versions.
+
+    Returns True if user acknowledged (or non-interactive), False if declined.
+    """
+    # Find entries in cache that are missing from installed
+    missing = sorted(
+        (v, cache_whatsnew[v]) for v in cache_whatsnew
+        if v not in installed_whatsnew
+    )
+    if not missing:
+        return True
+
+    use_ansi = stderr_supports_ansi()
+    _display_whatsnew_entries(missing, "What's new in Cypilot", use_ansi=use_ansi)
+    return _prompt_continue(interactive)
+
+
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-read-whatsnew
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-read-installed-version
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-filter-versions
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-check-no-new
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-sort-versions
+# @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-return-ack
+def show_kit_whatsnew(
+    kit_source_dir: Path,
+    installed_version: str,
+    kit_slug: str,
+    *,
+    interactive: bool = True,
+) -> bool:
+    """Display whatsnew entries for kit versions newer than installed.
+
+    Used by `cpt kit update` to show changes between installed and source versions.
+
+    Args:
+        kit_source_dir: Path to kit source containing whatsnew.toml.
+        installed_version: Currently installed version (e.g., "1.2.3").
+        kit_slug: Kit identifier for display title.
+        interactive: Whether to prompt for user confirmation.
+
+    Returns:
+        True if user acknowledged (or no entries to show), False if user aborted.
+    """
+    # Read whatsnew.toml from kit source
+    whatsnew_path = kit_source_dir / "whatsnew.toml"
+    whatsnew_data = read_whatsnew(whatsnew_path)
+
+    if not whatsnew_data:
+        return True  # No whatsnew file — proceed
+
+    # Treat missing installed version as "0.0.0"
+    if not installed_version:
+        installed_version = "0.0.0"
+
+    # Filter: keep versions > installed_version
+    new_entries = []
+    for ver, entry in whatsnew_data.items():
+        if compare_versions(ver, installed_version) > 0:
+            new_entries.append((ver, entry))
+
+    if not new_entries:
+        return True  # No new entries
+
+    # Sort by version ascending
+    new_entries.sort(key=lambda x: parse_semver(x[0]))
+
+    # Display
+    use_ansi = stderr_supports_ansi()
+    _display_whatsnew_entries(
+        new_entries,
+        f"What's new in {kit_slug} kit",
+        use_ansi=use_ansi,
+    )
+    return _prompt_continue(interactive)
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-return-ack
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-sort-versions
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-check-no-new
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-filter-versions
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-read-installed-version
+# @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-read-whatsnew

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.ui import ui
+from ..utils.whatsnew import show_kit_whatsnew
 
 
 # ---------------------------------------------------------------------------
@@ -1154,6 +1155,30 @@ def cmd_kit_update(argv: List[str]) -> int:
     errors: List[str] = []
 
     for kit_slug, kit_source, github_source, tmp_dir in update_targets:
+        # @cpt-begin:cpt-cypilot-flow-kit-update-cli:p1:inst-show-whatsnew
+        # Show whatsnew entries before file-level diff (if whatsnew.toml exists)
+        if not args.dry_run:
+            installed_version = _read_kit_version_from_core(config_dir, kit_slug)
+            ack = show_kit_whatsnew(
+                kit_source,
+                installed_version,
+                kit_slug,
+                interactive=interactive and not args.yes,
+            )
+            if not ack:
+                # User aborted — skip this kit
+                all_results.append({
+                    "kit": kit_slug,
+                    "action": "aborted",
+                    "accepted": [],
+                    "declined": [],
+                    "files_written": 0,
+                })
+                if tmp_dir:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                continue
+        # @cpt-end:cpt-cypilot-flow-kit-update-cli:p1:inst-show-whatsnew
+
         try:
             # @cpt-begin:cpt-cypilot-flow-kit-update-cli:p1:inst-legacy-migration
             # Legacy manifest migration is handled inside update_kit() when
