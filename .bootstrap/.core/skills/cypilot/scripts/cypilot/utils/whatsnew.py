@@ -14,6 +14,11 @@ from typing import Dict, Tuple
 logger = logging.getLogger(__name__)
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
+_BOLD_MARKUP_RE = re.compile(r"\*\*(.+?)\*\*")
+_INLINE_CODE_RE = re.compile(r"`(.+?)`")
+_ANSI_BOLD = "\033[1m"
+_ANSI_CYAN = "\033[36m"
+_ANSI_RESET = "\033[0m"
 
 
 def strip_control_chars(text: str, *, preserve_newlines: bool = False) -> str:
@@ -22,6 +27,22 @@ def strip_control_chars(text: str, *, preserve_newlines: bool = False) -> str:
     if preserve_newlines:
         return re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", sanitized)
     return re.sub(r"[\x00-\x1f\x7f]", "", sanitized)
+
+
+def _replace_bold_markup(match: re.Match[str]) -> str:
+    return match.group(1)
+
+
+def _replace_bold_markup_with_ansi(match: re.Match[str]) -> str:
+    return f"{_ANSI_BOLD}{match.group(1)}{_ANSI_RESET}"
+
+
+def _replace_inline_code_markup(match: re.Match[str]) -> str:
+    return match.group(1)
+
+
+def _replace_inline_code_markup_with_ansi(match: re.Match[str]) -> str:
+    return f"{_ANSI_CYAN}{match.group(1)}{_ANSI_RESET}"
 
 # @cpt-begin:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-whatsnew-version-cmp
 def parse_semver(version: str) -> Tuple[int, ...]:
@@ -93,10 +114,10 @@ def format_whatsnew_text(text: str, *, use_ansi: bool) -> str:
     otherwise strips the markers.
     """
     if use_ansi:
-        formatted = re.sub(r"\*\*(.+?)\*\*", "\033[1m\\1\033[0m", text)
-        return re.sub(r"`(.+?)`", "\033[36m\\1\033[0m", formatted)
-    plain = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    return re.sub(r"`(.+?)`", r"\1", plain)
+        formatted = _BOLD_MARKUP_RE.sub(_replace_bold_markup_with_ansi, text)
+        return _INLINE_CODE_RE.sub(_replace_inline_code_markup_with_ansi, formatted)
+    plain = _BOLD_MARKUP_RE.sub(_replace_bold_markup, text)
+    return _INLINE_CODE_RE.sub(_replace_inline_code_markup, plain)
 # @cpt-end:cpt-cypilot-algo-kit-whatsnew-display:p1:inst-whatsnew-format
 
 
