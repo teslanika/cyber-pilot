@@ -346,7 +346,7 @@ class TestCleanupCorePath(unittest.TestCase):
             result = cleanup_core_path(root, ".cypilot", INSTALL_TYPE_GIT_CLONE)
             self.assertTrue(result["success"])
             self.assertFalse((root / ".cypilot").exists())
-            self.assertTrue(len(result["warnings"]) > 0)
+            self.assertGreater(len(result["warnings"]), 0)
 
 
 # ===========================================================================
@@ -484,7 +484,7 @@ class TestConvertArtifactsRegistry(unittest.TestCase):
                 "kits": {"sdlc": {"format": "Cypilot", "path": "kits/sdlc"}},
                 "ignore": [],
             }
-            result = convert_artifacts_registry(v2_data, target)
+            convert_artifacts_registry(v2_data, target)
             from cypilot.utils import toml_utils
             registry = toml_utils.load(target / "artifacts.toml")
             system = registry["systems"][0]
@@ -555,7 +555,7 @@ class TestGenerateCoreToml(unittest.TestCase):
             root = Path(d) / "my-project"
             root.mkdir()
             target = root / "cypilot" / "config"
-            result = generate_core_toml(root, [], {}, target)
+            generate_core_toml(root, [], {}, target)
             from cypilot.utils import toml_utils
             core = toml_utils.load(target / "core.toml")
             self.assertNotIn("system", core)  # ADR-0014: system lives in artifacts.toml
@@ -666,7 +666,7 @@ class TestMigrateKits(unittest.TestCase):
             (cypilot_dir / "config").mkdir(parents=True)
             (cypilot_dir / ".gen").mkdir(parents=True)
 
-            result = migrate_kits(
+            migrate_kits(
                 {"my-kit": {"format": "Cypilot"}},
                 ".cypilot-adapter",
                 root,
@@ -729,7 +729,7 @@ class TestValidateMigration(unittest.TestCase):
             v2 = {"systems": [], "has_agents_md": False}
             result = validate_migration(root, cypilot_dir, v2)
             self.assertFalse(result["passed"])
-            self.assertTrue(len(result["issues"]) > 0)
+            self.assertGreater(len(result["issues"]), 0)
 
     def test_valid_migration(self):
         with TemporaryDirectory() as d:
@@ -794,8 +794,6 @@ class TestRunMigrate(unittest.TestCase):
                     # Also patch init's CACHE_DIR since it's used via _copy_from_cache
                     with patch("cypilot.commands.init.CACHE_DIR", cache):
                         # Patch cmd_agents to avoid complexity in test
-                        with patch("cypilot.commands.migrate.run_migrate.__module__"):
-                            pass
                         result = run_migrate(root, yes=True)
             finally:
                 os.chdir(cwd)
@@ -1551,11 +1549,10 @@ class TestRunMigrateEdgeCases(unittest.TestCase):
             _make_cache(cache)
             with patch("cypilot.commands.migrate.CACHE_DIR", cache):
                 with patch("cypilot.commands.init.CACHE_DIR", cache):
-                    with patch("cypilot.commands.agents.cmd_generate_agents",
+                    with patch("cypilot.commands.migrate._cmd_generate_agents",
                                side_effect=Exception("agents broke")):
                         result = run_migrate(root, yes=True)
-            if result["status"] == "PASS":
-                self.assertTrue(any("agents" in w.lower() for w in result.get("warnings", [])))
+            self.assertTrue(any("agents" in w.lower() for w in result.get("warnings", [])))
 
 
 # ===========================================================================
@@ -1993,7 +1990,7 @@ class TestRollbackOSError(unittest.TestCase):
             with patch("shutil.copy2", side_effect=failing_copy):
                 result = _rollback(root, backup)
             self.assertFalse(result["success"])
-            self.assertTrue(len(result["errors"]) > 0)
+            self.assertGreater(len(result["errors"]), 0)
 
 
 # ===========================================================================
@@ -2257,11 +2254,57 @@ class TestRunMigrateAgentsSystemExit(unittest.TestCase):
             _make_cache(cache)
             with patch("cypilot.commands.migrate.CACHE_DIR", cache):
                 with patch("cypilot.commands.init.CACHE_DIR", cache):
-                    with patch("cypilot.commands.agents.cmd_generate_agents",
+                    with patch("cypilot.commands.migrate._cmd_generate_agents",
                                side_effect=SystemExit(0)):
                         result = run_migrate(root, yes=True)
             # Should not crash; migration continues
             self.assertIn(result["status"], ("PASS", "VALIDATION_FAILED"))
+            # Success exit should NOT produce a warning
+            warnings = result.get("warnings", [])
+            self.assertFalse(
+                any("Agent entry point regeneration failed" in w for w in warnings),
+                f"Unexpected agent warning on SystemExit(0): {warnings}",
+            )
+
+    def test_system_exit_nonzero_surfaces_warning(self):
+        with TemporaryDirectory() as d:
+            root = Path(d)
+            _make_v2_project(root)
+            cache = root / "_cache"
+            _make_cache(cache)
+            with patch("cypilot.commands.migrate.CACHE_DIR", cache):
+                with patch("cypilot.commands.init.CACHE_DIR", cache):
+                    with patch("cypilot.commands.migrate._cmd_generate_agents",
+                               side_effect=SystemExit(1)):
+                        result = run_migrate(root, yes=True)
+            # Migration should still complete (agent failure is non-fatal)
+            self.assertIn(result["status"], ("PASS", "VALIDATION_FAILED"))
+            # Non-zero exit must surface as a warning
+            warnings = result.get("warnings", [])
+            self.assertTrue(
+                any("Agent entry point regeneration failed" in w for w in warnings),
+                f"Expected agent warning on SystemExit(1), got: {warnings}",
+            )
+
+    def test_nonzero_return_code_surfaces_warning(self):
+        with TemporaryDirectory() as d:
+            root = Path(d)
+            _make_v2_project(root)
+            cache = root / "_cache"
+            _make_cache(cache)
+            with patch("cypilot.commands.migrate.CACHE_DIR", cache):
+                with patch("cypilot.commands.init.CACHE_DIR", cache):
+                    with patch("cypilot.commands.migrate._cmd_generate_agents",
+                               return_value=1):
+                        result = run_migrate(root, yes=True)
+            # Migration should still complete (agent failure is non-fatal)
+            self.assertIn(result["status"], ("PASS", "VALIDATION_FAILED"))
+            # Non-zero return code must surface as a warning
+            warnings = result.get("warnings", [])
+            self.assertTrue(
+                any("Agent entry point regeneration failed" in w for w in warnings),
+                f"Expected agent warning on rc=1, got: {warnings}",
+            )
 
 
 # ===========================================================================
@@ -2310,7 +2353,7 @@ class TestRunMigrateJsonConvertFailed(unittest.TestCase):
             _make_cache(cache)
             with patch("cypilot.commands.migrate.CACHE_DIR", cache):
                 with patch("cypilot.commands.init.CACHE_DIR", cache):
-                    result = run_migrate(root, yes=True)
+                    run_migrate(root, yes=True)
             # Adapter dir should be preserved due to failed JSON conversion
             self.assertTrue((root / ".cypilot-adapter").is_dir())
 

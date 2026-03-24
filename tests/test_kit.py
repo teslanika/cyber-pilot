@@ -1493,6 +1493,33 @@ class TestCmdKitUpdateCli(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
+    def test_update_all_fail_returns_nonzero(self):
+        """cmd_kit_update returns 1 when all kit updates raise errors."""
+        from cypilot.commands.kit import cmd_kit_update
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            adapter = _bootstrap_project(root)
+            kit_src = _make_kit_source(Path(td) / "src", "mykit")
+            cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                with patch(
+                    "cypilot.commands.kit.update_kit",
+                    side_effect=RuntimeError("forced failure"),
+                ):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        rc = cmd_kit_update(["--path", str(kit_src)])
+                self.assertEqual(rc, 1)
+                out = json.loads(buf.getvalue())
+                self.assertIn(out["status"], ("WARN", "FAIL"))
+                self.assertTrue(
+                    all(r.get("action") == "ERROR" for r in out["results"]),
+                    f"Expected all actions to be ERROR, got {out['results']}",
+                )
+            finally:
+                os.chdir(cwd)
+
 
 # ---------------------------------------------------------------------------
 # update_kit version-check + partial/declined paths
@@ -1524,6 +1551,336 @@ class TestUpdateKitVersionPaths(unittest.TestCase):
             r = update_kit("tk", src, cyp, force=False)
             self.assertEqual(r["version"]["status"], "current")
             self.assertIn("skill_nav", r)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for phase-04 Sonar refactor bugs
+# ---------------------------------------------------------------------------
+
+class TestFirstInstallSourcePersistence(unittest.TestCase):
+    """Regression A: update_kit first-install must persist source in core.toml."""
+
+    def test_first_install_persists_source(self):
+        from cypilot.commands.kit import update_kit
+        from cypilot.utils import toml_utils
+        import tomllib
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            adapter = _bootstrap_project(root, "cypilot")
+            kit_src = _make_kit_source(Path(td) / "src", "demo")
+
+            r = update_kit("demo", kit_src, adapter, source="github:owner/repo", interactive=False)
+
+            self.assertEqual(r["version"]["status"], "created")
+            core_toml = adapter / "config" / "core.toml"
+            self.assertTrue(core_toml.is_file())
+            with open(core_toml, "rb") as f:
+                data = tomllib.load(f)
+            kit_entry = data.get("kits", {}).get("demo", {})
+            self.assertEqual(kit_entry.get("path"), "config/kits/demo")
+            self.assertIn("version", kit_entry)
+            self.assertEqual(kit_entry.get("source"), "github:owner/repo")
+
+
+class TestDetectMigrateLayoutFailureSafe(unittest.TestCase):
+    """Regression B+C: _detect_and_migrate_layout must be failure-safe."""
+
+    def _setup_adapter(self, td: Path) -> Path:
+        """Create a minimal adapter dir with config/core.toml."""
+        adapter = Path(td) / "adapter"
+        (adapter / "config" / "kits").mkdir(parents=True)
+        from cypilot.utils import toml_utils
+        toml_utils.dump({
+            "version": "1.0",
+            "kits": {"badkit": {"format": "Cypilot", "path": "kits/badkit"}},
+        }, adapter / "config" / "core.toml")
+        return adapter
+
+    def test_failed_migration_keeps_legacy_dirs_and_core_toml(self):
+        """B: when kits/badkit migration fails, kits/ and .gen/kits/ must survive."""
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        import tomllib
+        with TemporaryDirectory() as td:
+            adapter = self._setup_adapter(Path(td))
+
+            # Create legacy kits/ and .gen/kits/ for badkit
+            kit_legacy = adapter / "kits" / "badkit"
+            kit_legacy.mkdir(parents=True)
+            (kit_legacy / "SKILL.md").write_text("# Kit\n", encoding="utf-8")
+            gen_kit_legacy = adapter / ".gen" / "kits" / "badkit"
+            gen_kit_legacy.mkdir(parents=True)
+            (gen_kit_legacy / "SKILL.md").write_text("# Gen Kit\n", encoding="utf-8")
+
+            # Force kits/badkit iteration to raise so migration fails
+            original_iterdir = Path.iterdir
+            def _failing_iterdir(self_path):
+                if self_path == kit_legacy:
+                    raise OSError("boom")
+                return original_iterdir(self_path)
+
+            with patch.object(Path, "iterdir", _failing_iterdir):
+                result = _detect_and_migrate_layout(adapter)
+
+            self.assertTrue(result.get("badkit", "").startswith("FAILED"),
+                            f"Expected FAILED status, got: {result}")
+            self.assertTrue((adapter / "kits").is_dir(), "kits/ was deleted on failure")
+            self.assertTrue((adapter / ".gen" / "kits").is_dir(), ".gen/kits/ was deleted on failure")
+
+            # core.toml path must still point to legacy location
+            with open(adapter / "config" / "core.toml", "rb") as f:
+                data = tomllib.load(f)
+            self.assertEqual(data["kits"]["badkit"]["path"], "kits/badkit",
+                             "core.toml was rewritten despite migration failure")
+
+    def test_gen_failure_overrides_earlier_success_for_same_slug(self):
+        """C: .gen/kits/{slug} failure must override earlier kits/{slug} success."""
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        import tomllib
+        with TemporaryDirectory() as td:
+            adapter = self._setup_adapter(Path(td))
+            # Reset core.toml to reference samekit via kits/
+            from cypilot.utils import toml_utils
+            toml_utils.dump({
+                "version": "1.0",
+                "kits": {"samekit": {"format": "Cypilot", "path": "kits/samekit"}},
+            }, adapter / "config" / "core.toml")
+
+            # Create legacy kits/samekit (will succeed) and .gen/kits/samekit (will fail)
+            kit_legacy = adapter / "kits" / "samekit"
+            kit_legacy.mkdir(parents=True)
+            (kit_legacy / "SKILL.md").write_text("# Kit\n", encoding="utf-8")
+            gen_kit_legacy = adapter / ".gen" / "kits" / "samekit"
+            gen_kit_legacy.mkdir(parents=True)
+            (gen_kit_legacy / "SKILL.md").write_text("# Gen Kit\n", encoding="utf-8")
+
+            # Force .gen/kits/samekit iteration to raise
+            original_iterdir = Path.iterdir
+            def _failing_gen_iterdir(self_path):
+                if self_path == gen_kit_legacy:
+                    raise OSError("gen-boom")
+                return original_iterdir(self_path)
+
+            with patch.object(Path, "iterdir", _failing_gen_iterdir):
+                result = _detect_and_migrate_layout(adapter)
+
+            self.assertTrue(result.get("samekit", "").startswith("FAILED"),
+                            f"Expected FAILED (not masked), got: {result}")
+            # Legacy dirs must survive
+            self.assertTrue((adapter / "kits").is_dir(), "kits/ was deleted on failure")
+            self.assertTrue((adapter / ".gen" / "kits").is_dir(), ".gen/kits/ was deleted on failure")
+            # core.toml must not have been rewritten
+            with open(adapter / "config" / "core.toml", "rb") as f:
+                data = tomllib.load(f)
+            self.assertEqual(data["kits"]["samekit"]["path"], "kits/samekit",
+                             "core.toml was rewritten despite .gen migration failure")
+
+
+# ---------------------------------------------------------------------------
+# Regression: partial GitHub source failures surfaced in structured output
+# ---------------------------------------------------------------------------
+
+class TestPartialGithubSourceFailures(unittest.TestCase):
+    """Bug 1: cmd_kit_update must surface per-kit failures when some GitHub
+    downloads fail while others succeed."""
+
+    def setUp(self):
+        from cypilot.utils.ui import set_json_mode
+        set_json_mode(True)
+
+    def tearDown(self):
+        from cypilot.utils.ui import set_json_mode
+        set_json_mode(False)
+
+    def test_one_good_one_bad_github_kit(self):
+        """One kit downloads OK, one fails → partial failure in results."""
+        from cypilot.commands.kit import cmd_kit_update
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            adapter = _bootstrap_project(root)
+            good_src = _make_kit_source(Path(td) / "dl", "goodkit")
+            from cypilot.utils import toml_utils
+            toml_utils.dump({
+                "version": "1.0",
+                "project_root": "..",
+                "kits": {
+                    "goodkit": {"format": "Cypilot", "path": "config/kits/goodkit", "source": "github:owner/goodkit"},
+                    "badkit": {"format": "Cypilot", "path": "config/kits/badkit", "source": "github:owner/badkit"},
+                },
+            }, adapter / "config" / "core.toml")
+
+            def _mock_download(owner, repo, version):
+                if repo == "goodkit":
+                    return (good_src, "1.0")
+                raise RuntimeError("rate limit")
+
+            cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                with patch("cypilot.commands.kit._download_kit_from_github", side_effect=_mock_download):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        rc = cmd_kit_update(["--force", "-y"])
+                self.assertEqual(rc, 0)
+                out = json.loads(buf.getvalue())
+                # Top-level status must not be plain PASS
+                self.assertEqual(out["status"], "WARN")
+                self.assertIn("errors", out)
+                # Failed kit must appear in results
+                slugs = {r["kit"] for r in out["results"]}
+                self.assertIn("badkit", slugs)
+                self.assertIn("goodkit", slugs)
+                bad_r = next(r for r in out["results"] if r["kit"] == "badkit")
+                self.assertEqual(bad_r["action"], "ERROR")
+                self.assertIn("message", bad_r)
+            finally:
+                os.chdir(cwd)
+
+    def test_all_kits_fail_returns_structured_errors(self):
+        """When ALL kits fail download, rc=2 but results contain per-kit errors."""
+        from cypilot.commands.kit import cmd_kit_update
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            adapter = _bootstrap_project(root)
+            from cypilot.utils import toml_utils
+            toml_utils.dump({
+                "version": "1.0",
+                "project_root": "..",
+                "kits": {
+                    "k1": {"format": "Cypilot", "path": "config/kits/k1", "source": "github:o/r1"},
+                    "k2": {"format": "Cypilot", "path": "config/kits/k2", "source": "github:o/r2"},
+                },
+            }, adapter / "config" / "core.toml")
+
+            cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                with patch(
+                    "cypilot.commands.kit._download_kit_from_github",
+                    side_effect=RuntimeError("network error"),
+                ):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        rc = cmd_kit_update([])
+                self.assertEqual(rc, 2)
+                out = json.loads(buf.getvalue())
+                self.assertEqual(out["status"], "FAIL")
+                self.assertIn("results", out)
+                self.assertEqual(len(out["results"]), 2)
+                for r in out["results"]:
+                    self.assertEqual(r["action"], "ERROR")
+            finally:
+                os.chdir(cwd)
+
+    def test_resolve_github_update_targets_returns_failures(self):
+        """_resolve_github_update_targets returns (targets, failures) tuple."""
+        from cypilot.commands.kit import _resolve_github_update_targets
+        kits_map = {
+            "nokit": {"format": "Cypilot"},
+            "badproto": {"format": "Cypilot", "source": "ftp://bad"},
+        }
+        targets, failures = _resolve_github_update_targets(kits_map)
+        self.assertEqual(targets, [])
+        self.assertEqual(len(failures), 2)
+        slugs = {f["kit"] for f in failures}
+        self.assertEqual(slugs, {"nokit", "badproto"})
+        for f in failures:
+            self.assertEqual(f["action"], "ERROR")
+            self.assertIn("message", f)
+
+
+# ---------------------------------------------------------------------------
+# Regression: unchanged count preserved through cmd_kit_update
+# ---------------------------------------------------------------------------
+
+class TestUnchangedPreservedInUpdateResult(unittest.TestCase):
+    """Bug 2: unchanged count from file_level_kit_update must survive
+    through _build_kit_update_result into the emitted JSON."""
+
+    def setUp(self):
+        from cypilot.utils.ui import set_json_mode
+        set_json_mode(True)
+
+    def tearDown(self):
+        from cypilot.utils.ui import set_json_mode
+        set_json_mode(False)
+
+    def test_build_kit_update_result_preserves_unchanged(self):
+        """_build_kit_update_result extracts unchanged from gen dict."""
+        from cypilot.commands.kit import _build_kit_update_result
+        kit_r = {
+            "version": {"status": "current"},
+            "gen": {"files_written": 0, "accepted_files": [], "unchanged": 7},
+        }
+        result = _build_kit_update_result("mykit", kit_r)
+        self.assertEqual(result["unchanged"], 7)
+        self.assertEqual(result["action"], "current")
+
+    def test_build_kit_update_result_unchanged_defaults_zero(self):
+        """When gen has no unchanged key, defaults to 0."""
+        from cypilot.commands.kit import _build_kit_update_result
+        kit_r = {
+            "version": {"status": "updated"},
+            "gen": {"files_written": 2, "accepted_files": ["a.md", "b.md"]},
+        }
+        result = _build_kit_update_result("mykit", kit_r)
+        self.assertEqual(result["unchanged"], 0)
+
+    def test_cmd_kit_update_emits_unchanged(self):
+        """Full cmd_kit_update path with identical files → unchanged in JSON results."""
+        from cypilot.commands.kit import cmd_kit_update, install_kit
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            adapter = _bootstrap_project(root)
+            kit_src = _make_kit_source(Path(td), "unchkit")
+            install_kit(kit_src, adapter, "unchkit")
+            # Update with identical source → all files unchanged
+            cwd = os.getcwd()
+            try:
+                os.chdir(str(root))
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = cmd_kit_update(["--path", str(kit_src), "--force"])
+                self.assertEqual(rc, 0)
+                out = json.loads(buf.getvalue())
+                r = out["results"][0]
+                self.assertIn("unchanged", r)
+                self.assertGreaterEqual(r["unchanged"], 0)
+            finally:
+                os.chdir(cwd)
+
+
+# ---------------------------------------------------------------------------
+# Regression: init artifact_kinds metadata preserved
+# ---------------------------------------------------------------------------
+
+class TestInitArtifactKindsMetadata(unittest.TestCase):
+    """Bug 3: _install_default_kit must propagate artifact_kinds into
+    kit_results so _human_init_ok can display them."""
+
+    def test_install_default_kit_includes_artifact_kinds(self):
+        from cypilot.commands.init import _install_default_kit
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            adapter = _bootstrap_project(root)
+            kit_src = _make_kit_source(Path(td) / "dl", "sdlc")
+
+            with patch(
+                "cypilot.commands.kit._parse_github_source",
+                return_value=("owner", "repo", "v1"),
+            ), patch(
+                "cypilot.commands.kit._download_kit_from_github",
+                return_value=(kit_src, "1.0"),
+            ):
+                actions: dict = {}
+                errors: list = []
+                kit_results = _install_default_kit(adapter, False, actions, errors)
+
+            self.assertIn("sdlc", kit_results)
+            kr = kit_results["sdlc"]
+            self.assertIn("artifact_kinds", kr)
+            # Our _make_kit_source creates artifacts/FEATURE/
+            self.assertIn("FEATURE", kr["artifact_kinds"])
+            self.assertGreater(kr["files_written"], 0)
 
 
 if __name__ == "__main__":
