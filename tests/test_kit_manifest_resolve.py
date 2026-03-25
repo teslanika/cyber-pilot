@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "cypilot" / "scripts"))
 
+from _test_helpers import bootstrap_test_project
 from cypilot.utils.manifest import resolve_resource_bindings
 
 
@@ -34,29 +35,11 @@ def _write_core_toml(config_dir: Path, data: dict) -> Path:
 
 
 def _bootstrap_project(root: Path, adapter_rel: str = "cypilot") -> Path:
-    """Set up a minimal initialized project for kit commands."""
-    root.mkdir(parents=True, exist_ok=True)
-    (root / ".git").mkdir(exist_ok=True)
-    (root / "AGENTS.md").write_text(
-        f'<!-- @cpt:root-agents -->\n```toml\ncypilot_path = "{adapter_rel}"\n```\n<!-- /@cpt:root-agents -->\n',
-        encoding="utf-8",
+    return bootstrap_test_project(
+        root,
+        adapter_rel,
+        systems=[{"name": "TestProject", "slug": "test"}],
     )
-    adapter = root / adapter_rel
-    config = adapter / "config"
-    gen = adapter / ".gen"
-    for d in [adapter, config, gen, adapter / ".core"]:
-        d.mkdir(parents=True, exist_ok=True)
-    (config / "AGENTS.md").write_text("# Test\n", encoding="utf-8")
-    from cypilot.utils import toml_utils
-    toml_utils.dump({
-        "version": "1.0",
-        "project_root": "..",
-        "kits": {},
-    }, config / "core.toml")
-    toml_utils.dump({
-        "systems": [{"name": "TestProject", "slug": "test"}],
-    }, config / "artifacts.toml")
-    return adapter
 
 
 # ---------------------------------------------------------------------------
@@ -289,8 +272,8 @@ class TestResolveResourceBindings(unittest.TestCase):
             self.assertIn("good", result)
             self.assertNotIn("bad", result)
 
-    def test_corrupted_core_toml_returns_empty(self):
-        """Corrupted core.toml that can't be parsed → empty dict."""
+    def test_corrupted_core_toml_raises_parse_error(self):
+        """Corrupted core.toml that can't be parsed → explicit parse error."""
         with TemporaryDirectory() as td:
             td_path = Path(td)
             cypilot_dir = td_path / "cypilot"
@@ -299,8 +282,8 @@ class TestResolveResourceBindings(unittest.TestCase):
             config_dir.mkdir(parents=True)
             (config_dir / "core.toml").write_text("[broken\ninvalid", encoding="utf-8")
 
-            result = resolve_resource_bindings(config_dir, "mykit", cypilot_dir)
-            self.assertEqual(result, {})
+            with self.assertRaisesRegex(ValueError, "Failed to parse"):
+                resolve_resource_bindings(config_dir, "mykit", cypilot_dir)
 
     def test_kits_not_a_dict_returns_empty(self):
         """core.toml with kits = 'string' instead of table → empty dict."""

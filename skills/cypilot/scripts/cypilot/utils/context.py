@@ -209,6 +209,64 @@ def _resolve_loaded_kit_constraints_path(
     return (kit_root / _CONSTRAINTS_FILE).resolve()
 
 
+def load_resource_bindings(adapter_dir: Path, kit_id: str) -> Tuple[Optional[Dict[str, str]], Dict[str, Path], List[Dict[str, object]]]:
+    """Load manifest resource bindings for a kit, preserving context errors."""
+    rb: Optional[Dict[str, str]] = None
+    resolved_bindings: Dict[str, Path] = {}
+    errors: List[Dict[str, object]] = []
+    cfg_dir = adapter_dir / "config"
+    if not cfg_dir.is_dir():
+        cfg_dir = adapter_dir
+    try:
+        from .manifest import resolve_resource_bindings_with_errors as _resolve_rb
+
+        resolved_bindings, binding_errors = _resolve_rb(cfg_dir, kit_id, adapter_dir)
+        if resolved_bindings:
+            rb = {k: str(v) for k, v in resolved_bindings.items()}
+        for binding_error in binding_errors:
+            errors.append(error(
+                "resources",
+                binding_error,
+                path=(cfg_dir / "core.toml"),
+                line=1,
+                kit=kit_id,
+            ))
+    except ValueError as exc:
+        errors.append(error(
+            "resources",
+            str(exc),
+            path=(cfg_dir / "core.toml"),
+            line=1,
+            kit=kit_id,
+        ))
+    except (OSError, ImportError) as exc:
+        sys.stderr.write(f"context: failed to load resource bindings for kit {kit_id}: {exc}\n")
+    return rb, resolved_bindings, errors
+
+
+def resolve_constraints_from_bindings(
+    _resolved_bindings: Dict[str, Path],
+    kit_root: Optional[Path],
+) -> Tuple[Optional[KitConstraints], List[str], Optional[Path], Optional[Path]]:
+    """Resolve constraints from bindings first, then from the kit root."""
+    _constraints_root: Optional[Path] = kit_root if isinstance(kit_root, Path) else None
+    resolved_constraints_path: Optional[Path] = None
+    if _resolved_bindings and "constraints" in _resolved_bindings:
+        _constraints_path = _resolved_bindings["constraints"].resolve()
+        resolved_constraints_path = _constraints_path
+        _constraints_root = _constraints_path.parent
+        if not _constraints_path.is_file():
+            return None, [f"Bound constraints path does not exist or is not a file: {_constraints_path}"], resolved_constraints_path, _constraints_root
+
+    kit_constraints: Optional[KitConstraints] = None
+    constraints_errs: List[str] = []
+    if _constraints_root is not None and _constraints_root.is_dir():
+        kit_constraints, constraints_errs = load_constraints_toml(_constraints_root)
+    if resolved_constraints_path is None and _constraints_root is not None and _constraints_root.is_dir():
+        resolved_constraints_path = (_constraints_root / _CONSTRAINTS_FILE).resolve()
+    return kit_constraints, constraints_errs, resolved_constraints_path, _constraints_root
+
+
 def _load_single_kit(kit_id, kit, adapter_dir, project_root):
     """Load a single kit's templates, constraints, and resource bindings."""
     templates = {}
@@ -220,43 +278,16 @@ def _load_single_kit(kit_id, kit, adapter_dir, project_root):
             _build_inaccessible_kit_path_error(adapter_dir, str(kit_id), str(kit.path or ""))
         )
     # @cpt-begin:cpt-cypilot-algo-core-infra-context-loading:p1:inst-ctx-load-resource-bindings
-    rb = None
-    _resolved_bindings = {}
-    try:
-        from .manifest import resolve_resource_bindings as _resolve_rb
-        cfg_dir = adapter_dir / "config"
-        if not cfg_dir.is_dir():
-            cfg_dir = adapter_dir
-        _resolved_bindings = _resolve_rb(cfg_dir, kit_id, adapter_dir)
-        if _resolved_bindings:
-            rb = {k: str(v) for k, v in _resolved_bindings.items()}
-    except ValueError as exc:
-        errors.append(error(
-            "resources",
-            str(exc),
-            path=(cfg_dir / "core.toml"),
-            line=1,
-            kit=kit_id,
-        ))
-    except (OSError, ImportError) as exc:
-        sys.stderr.write(f"context: failed to load resource bindings for kit {kit_id}: {exc}\n")
+    rb, _resolved_bindings, resource_binding_errors = load_resource_bindings(adapter_dir, kit_id)
+    errors.extend(resource_binding_errors)
     # @cpt-end:cpt-cypilot-algo-core-infra-context-loading:p1:inst-ctx-load-resource-bindings
 
-    kit_constraints = None
-    constraints_errs = []
     # @cpt-begin:cpt-cypilot-algo-core-infra-context-loading:p1:inst-constraints-from-binding
-    _constraints_root: Optional[Path] = kit_root if isinstance(kit_root, Path) else None
-    resolved_constraints_path: Optional[Path] = None
-    if _resolved_bindings and "constraints" in _resolved_bindings:
-        _constraints_path = _resolved_bindings["constraints"]
-        if _constraints_path.is_file():
-            _constraints_root = _constraints_path.parent
-            resolved_constraints_path = _constraints_path.resolve()
+    kit_constraints, constraints_errs, resolved_constraints_path, _constraints_root = resolve_constraints_from_bindings(
+        _resolved_bindings,
+        kit_root,
+    )
     # @cpt-end:cpt-cypilot-algo-core-infra-context-loading:p1:inst-constraints-from-binding
-    if _constraints_root is not None and _constraints_root.is_dir():
-        kit_constraints, constraints_errs = load_constraints_toml(_constraints_root)
-    if resolved_constraints_path is None and _constraints_root is not None and _constraints_root.is_dir():
-        resolved_constraints_path = (_constraints_root / _CONSTRAINTS_FILE).resolve()
 
     if constraints_errs:
         constraints_path = resolved_constraints_path

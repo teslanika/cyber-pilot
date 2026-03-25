@@ -77,23 +77,28 @@ def run_validate_kits(
             continue
 
         kit_root = getattr(loaded_kit, "kit_root", None)
-        if not isinstance(kit_root, Path):
-            kit_root = adapter_dir.resolve()
+        kit_path_value = str(getattr(getattr(loaded_kit, "kit", None), "path", "") or "")
+        reported_kit_path = str(kit_root) if isinstance(kit_root, Path) else kit_path_value
         constraints_path = _resolve_loaded_kit_constraints_path(
             adapter_dir,
             project_root,
             loaded_kit,
         )
         kit_id_str = str(kit_id)
-        constraints_root = constraints_path.parent if constraints_path is not None else kit_root
+        constraints_root = constraints_path.parent if constraints_path is not None else (
+            kit_root if isinstance(kit_root, Path) else None
+        )
 
-        _kc, kc_errs = load_constraints_toml(constraints_root)
+        if constraints_root is not None:
+            _kc, kc_errs = load_constraints_toml(constraints_root)
+        else:
+            _kc, kc_errs = None, []
         kit_resource_errors = context_resource_errors.get(kit_id_str, [])
         rep_errors: List[Dict[str, object]] = list(kit_resource_errors)
 
         rep: Dict[str, object] = {
             "kit": kit_id_str,
-            "path": str(kit_root),
+            "path": reported_kit_path,
             "status": "PASS",
             "error_count": 0,
         }
@@ -101,7 +106,7 @@ def run_validate_kits(
             constraints_err = constraints_error(
                 "constraints",
                 "Invalid constraints.toml",
-                path=(constraints_path or (kit_root / "constraints.toml")),
+                path=(constraints_path or (constraints_root / "constraints.toml")),
                 line=1,
                 errors=list(kc_errs),
                 kit=kit_id_str,

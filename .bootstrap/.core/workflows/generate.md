@@ -277,7 +277,19 @@ Workflow / instruction Markdown file with TOC requirements:
 {cpt_cmd} --json validate-toc {PATH}
 ```
 
-Rules: execute the deterministic validator BEFORE any semantic review; choose the target-applicable deterministic validator command(s) for the current output and rules (for example `{cpt_cmd} --json validate`, `{cpt_cmd} --json validate --artifact {PATH}`, `{cpt_cmd} --json validate-toc {PATH}`, or another deterministic validator explicitly required by the current target); use `{cpt_cmd} --json validate-toc {PATH}` as the canonical deterministic validator for workflow / instruction Markdown files when TOC validation applies, and MUST NOT classify that target as having no target-applicable deterministic validator while that route exists; treat `{cpt_cmd} --json validate --artifact {PATH}` as artifact-scoped only when the current file is a registered artifact target; record the exact deterministic validator command(s) executed, including subcommand and path flags, plus each command's actual validator exit code and JSON `status` / `error_count` / `warning_count`; record the overall deterministic gate result across the full required validator set; if no target-applicable deterministic validator exists for the current written output and RELAXED mode takes the explicitly unvalidated path, record `Deterministic gate: SKIPPED`, explicit `Validator availability proof`, explicit `Skip reason`, and an explicit `Validator-backed evidence note` that no deterministic validator command completed; if RELAXED recovery stops after repeated validation failure, record the actual failing command results and `Deterministic gate: FAIL`; in STRICT mode, MUST NOT proceed to Phase 6 until all applicable deterministic validator command(s) for the current target have been run and the overall deterministic gate is `PASS`; MUST NOT summarize validation without the actual validator output, omit which validator command produced each result, collapse a mixed-result validator set into a single untraceable line, or claim that no validator was target-applicable without the required validator-availability proof. If FAIL → fix errors → re-run until PASS. Repeated validation failure is a recovery branch, not a PASS substitute.
+Rules:
+- execute the deterministic validator BEFORE any semantic review
+- choose the target-applicable deterministic validator command(s) for the current output and rules (for example `{cpt_cmd} --json validate`, `{cpt_cmd} --json validate --artifact {PATH}`, `{cpt_cmd} --json validate-toc {PATH}`, or another deterministic validator explicitly required by the current target)
+- use `{cpt_cmd} --json validate-toc {PATH}` as the canonical deterministic validator for workflow / instruction Markdown files when TOC validation applies, and MUST NOT classify that target as having no target-applicable deterministic validator while that route exists
+- treat `{cpt_cmd} --json validate --artifact {PATH}` as artifact-scoped only when the current file is a registered artifact target
+- record the exact deterministic validator command(s) executed, including subcommand and path flags, plus each command's actual validator exit code and JSON `status` / `error_count` / `warning_count`
+- record the overall deterministic gate result across the full required validator set
+- if no target-applicable deterministic validator exists for the current written output and RELAXED mode takes the explicitly unvalidated path, record `Deterministic gate: SKIPPED`, explicit `Validator availability proof`, explicit `Skip reason`, and an explicit `Validator-backed evidence note` that no deterministic validator command completed
+- if RELAXED recovery stops after repeated validation failure, record the actual failing command results and `Deterministic gate: FAIL`
+- in STRICT mode, MUST NOT proceed to Phase 6 until all applicable deterministic validator command(s) for the current target have been run and the overall deterministic gate is `PASS`
+- MUST NOT summarize validation without the actual validator output, omit which validator command produced each result, collapse a mixed-result validator set into a single untraceable line, or claim that no validator was target-applicable without the required validator-availability proof
+- if FAIL → fix errors → re-run until PASS
+- repeated validation failure is a recovery branch, not a PASS substitute
 
 Only after PASS: load `checklist.md` if it was not already loaded, then self-review generated content against it, verify no placeholders (`TODO`, `TBD`, `FIXME`), verify cross-references are meaningful, and verify content quality/completeness.
 
@@ -301,6 +313,8 @@ Semantic Review: checklist coverage {summary}; content quality {summary}; issues
 If deterministic validation passes and semantic review passes: proceed to Phase 6. If no target-applicable deterministic validator exists for the current written output, STRICT mode stops here; RELAXED mode may proceed only on an explicitly unvalidated `Deterministic gate: SKIPPED` path with explicit `Validator availability proof`, `Skip reason`, and `Validator-backed evidence note`. If semantic issues are found: fix them and re-validate from the validator step. If deterministic validation cannot reach PASS after recovery attempts, follow Error Handling: STRICT mode stops here; RELAXED mode may only exit with an explicitly unvalidated `Deterministic gate: FAIL` result and MUST NOT present it as PASS. If Phase 4 wrote or updated any files before either RELAXED explicitly unvalidated exit, Phase 6 still applies and the response remains incomplete until both `Plan Review Prompt` and `Direct Review Prompt` blocks are emitted.
 
 ## Phase 6: Offer Next Steps
+
+Prerequisite guard: before constructing `Review Prompts`, verify that Phase 5 produced the complete `Validation Results` body from the canonical template with actual values filled in. If the body is missing, still contains placeholder/template content, or is otherwise incomplete, abort Phase 6 with a clear prerequisite error stating that Phase 5 validation output must be completed before review prompts can be generated.
 
 Read `## Next Steps` from `rules.md` and present:
 
@@ -328,6 +342,7 @@ Before ending a file-writing response, perform this final self-check: were files
 - explicitly begin with the phrase `Invoke skill cypilot`
 - state that `/cypilot-generate` is complete and the next chat is for reviewing the generated changes
 - embed inline: changed file paths, what was changed per file (brief summary), kind/target, and the completed `Validation Results` body with actual values
+- verify again before emitting the prompts that the `Validation Results` body is present and complete; if not, stop with the Phase 6 prerequisite error instead of generating partial prompts
 - do NOT reference "previous chat", "findings above", or any content outside the prompt itself
 - the prompt alone must give the next agent everything needed to start work immediately
 - generate **two separate prompts**:

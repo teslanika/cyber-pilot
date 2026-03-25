@@ -73,6 +73,8 @@ STATE_COMPLETED = "COMPLETED"
 STATE_ROLLED_BACK = "ROLLED_BACK"
 STATE_FAILED = "FAILED"
 
+CAF_FOLLOW_RE = re.compile(r"ALWAYS open and follow `([^`]+)`")
+
 # Core install type enum values
 INSTALL_TYPE_SUBMODULE = "SUBMODULE"
 INSTALL_TYPE_GIT_CLONE = "GIT_CLONE"
@@ -374,7 +376,20 @@ def backup_v2_state(
     # @cpt-end:cpt-cypilot-algo-v2-v3-migration-backup-v2-state:p1:inst-return-backup-path
 
 # @cpt-begin:cpt-cypilot-algo-v2-v3-migration-backup-v2-state:p1:inst-backup-rollback
-def _rollback(project_root: Path, backup_dir: Path) -> Dict[str, Any]:
+def _paths_overlap(left: Path, right: Path) -> bool:
+    left_resolved = left.resolve(strict=False)
+    right_resolved = right.resolve(strict=False)
+    return (
+        left_resolved == right_resolved
+        or right_resolved in left_resolved.parents
+        or left_resolved in right_resolved.parents
+    )
+
+def _rollback(
+    project_root: Path,
+    backup_dir: Path,
+    created_cypilot_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
     """Restore v2 state from backup. Returns rollback result."""
     manifest_file = backup_dir / "manifest.json"
     if not manifest_file.is_file():
@@ -386,6 +401,7 @@ def _rollback(project_root: Path, backup_dir: Path) -> Dict[str, Any]:
         return {"success": False, "error": f"Failed to read manifest: {e}"}
 
     restored: List[str] = []
+    cleaned: List[str] = []
     errors: List[str] = []
 
     for item in manifest.get("backed_up", []):
@@ -405,9 +421,24 @@ def _rollback(project_root: Path, backup_dir: Path) -> Dict[str, Any]:
         except OSError as e:
             errors.append(f"Failed to restore {item}: {e}")
 
+    if not errors and created_cypilot_dir is not None:
+        try:
+            restored_paths = [project_root / item for item in restored]
+            if created_cypilot_dir.exists() and not any(
+                _paths_overlap(created_cypilot_dir, restored_path)
+                for restored_path in restored_paths
+            ):
+                shutil.rmtree(created_cypilot_dir)
+                cleaned.append(str(created_cypilot_dir))
+        except OSError as e:
+            errors.append(
+                f"Failed to clean migration install dir {created_cypilot_dir}: {e}"
+            )
+
     return {
         "success": len(errors) == 0,
         "restored": restored,
+        "cleaned": cleaned,
         "errors": errors,
     }
 # @cpt-end:cpt-cypilot-algo-v2-v3-migration-backup-v2-state:p1:inst-backup-rollback
@@ -727,6 +758,7 @@ def _convert_system(
 def convert_agents_md(
     project_root: Path,
     adapter_path: str,
+    core_path: str,
     target_dir: Path,
 ) -> Dict[str, Any]:
     """Convert v2 adapter AGENTS.md to v3 config/AGENTS.md.
@@ -764,7 +796,9 @@ def convert_agents_md(
 
     # @cpt-begin:cpt-cypilot-algo-v2-v3-migration-convert-agents-md:p1:inst-remove-extends-ref
     extends_pattern = re.compile(
-        r'\n\*\*Extends\*\*:\s*`[^`]*\.cypilot/AGENTS\.md`\s*\n',
+        r'\n\*\*Extends\*\*:\s*`[^`]*'
+        + re.escape(core_path)
+        + r'/AGENTS\.md`\s*\n',
         re.IGNORECASE,
     )
     content = extends_pattern.sub('\n', content)
@@ -967,7 +1001,7 @@ _ADAPTER_SKILL_ROOTS = (".claude/skills", ".windsurf/skills")
 
 
 def _caf_follow_targets(txt: str) -> List[str]:
-    return [match.strip() for match in re.findall(r"ALWAYS open and follow `([^`]+)`", txt)]
+    return [match.strip() for match in CAF_FOLLOW_RE.findall(txt)]
 
 
 def _caf_target_refs_adapter_dir(
@@ -1009,7 +1043,7 @@ def _caf_strip_adapter_follow_targets(
     kept: List[str] = []
     removed_count = 0
     for line in txt.splitlines(keepends=True):
-        match = re.search(r"ALWAYS open and follow `([^`]+)`", line)
+        match = CAF_FOLLOW_RE.search(line)
         if match is None or not _caf_target_refs_adapter_dir(
             fpath, match.group(1).strip(), project_root, adapter_path,
         ):
@@ -1045,7 +1079,7 @@ def _caf_is_adapter_workflow_proxy(path: Path, project_root: Path, core_path: st
         return False
     if "ALWAYS open and follow" not in txt:
         return False
-    match = re.search(r"ALWAYS open and follow `([^`]+)`", txt)
+    match = CAF_FOLLOW_RE.search(txt)
     if match is None:
         return False
     try:
@@ -1058,13 +1092,63 @@ def _caf_is_adapter_workflow_proxy(path: Path, project_root: Path, core_path: st
     return str(target_path) in expected_targets
 
 
-def _caf_safe_unlink(fpath: Path, project_root: Path, removed: List[str]) -> None:
+def _caf_safe_unlink(
+    fpath: Path,
+    project_root: Path,
+    removed: List[str],
+    warnings: Optional[List[str]] = None,
+) -> None:
     """Unlink *fpath* and record it in *removed*; silently ignore filesystem errors."""
     try:
         fpath.unlink()
         removed.append(str(fpath.relative_to(project_root)))
-    except (PermissionError, FileNotFoundError, OSError):
-        pass
+    except (PermissionError, FileNotFoundError, OSError) as exc:
+        if warnings is not None:
+            warnings.append(
+                f"Failed to remove stale agent file {fpath.relative_to(project_root)}: {exc}"
+            )
+
+
+def _caf_process_md_file(
+    fpath: Path,
+    project_root: Path,
+    core_path: str,
+    adapter_path: str,
+    removed: List[str],
+    warnings: Optional[List[str]] = None,
+) -> None:
+    if not fpath.is_file():
+        return
+    if fpath.suffix.lower() not in (".md", ".mdc"):
+        return
+    if _caf_is_adapter_workflow_proxy(fpath, project_root, core_path):
+        _caf_safe_unlink(fpath, project_root, removed, warnings)
+        return
+    try:
+        txt = fpath.read_text(encoding="utf-8")
+    except OSError as e:
+        if warnings is not None:
+            warnings.append(
+                f"Failed to read stale agent file candidate {fpath.relative_to(project_root)}: {e}"
+            )
+        return
+    if not _caf_has_adapter_dir_ref(fpath, txt, project_root, adapter_path):
+        return
+    stripped_txt, removed_targets = _caf_strip_adapter_follow_targets(
+        fpath, txt, project_root, adapter_path,
+    )
+    if removed_targets == 0:
+        return
+    if _caf_is_pure_adapter_proxy_text(stripped_txt):
+        _caf_safe_unlink(fpath, project_root, removed, warnings)
+        return
+    try:
+        fpath.write_text(stripped_txt, encoding="utf-8")
+    except OSError as e:
+        if warnings is not None:
+            warnings.append(
+                f"Failed to rewrite stale agent file {fpath.relative_to(project_root)}: {e}"
+            )
 
 
 def _caf_scan_md_files(
@@ -1073,40 +1157,25 @@ def _caf_scan_md_files(
     core_path: str,
     adapter_path: str,
     removed: List[str],
+    warnings: Optional[List[str]] = None,
 ) -> None:
     """Scan one agent directory and remove or rewrite stale adapter references."""
     for fpath in list(agent_dir.iterdir()):
-        if not fpath.is_file():
-            continue
-        if fpath.suffix.lower() not in (".md", ".mdc"):
-            continue
-        if _caf_is_adapter_workflow_proxy(fpath, project_root, core_path):
-            _caf_safe_unlink(fpath, project_root, removed)
-            continue
-        try:
-            txt = fpath.read_text(encoding="utf-8")
-        except Exception as e:
-            logger.debug("Failed to read %s: %s", fpath, e)
-            continue
-        if _caf_has_adapter_dir_ref(fpath, txt, project_root, adapter_path):
-            stripped_txt, removed_targets = _caf_strip_adapter_follow_targets(
-                fpath, txt, project_root, adapter_path,
-            )
-            if removed_targets == 0:
-                continue
-            if _caf_is_pure_adapter_proxy_text(stripped_txt):
-                _caf_safe_unlink(fpath, project_root, removed)
-                continue
-            try:
-                fpath.write_text(stripped_txt, encoding="utf-8")
-            except Exception as e:
-                logger.debug("Failed to rewrite %s: %s", fpath, e)
+        _caf_process_md_file(
+            fpath,
+            project_root,
+            core_path,
+            adapter_path,
+            removed,
+            warnings,
+        )
 
 
 def _cleanup_old_adapter_agent_files(
     project_root: Path,
     adapter_path: str,
     core_path: str,
+    warnings: Optional[List[str]] = None,
 ) -> List[str]:
     """Remove stale v2 agent workflow/skill files after migration.
 
@@ -1132,7 +1201,14 @@ def _cleanup_old_adapter_agent_files(
     for rel_dir in _AGENT_WORKFLOW_DIRS:
         agent_dir = project_root / rel_dir
         if agent_dir.is_dir():
-            _caf_scan_md_files(agent_dir, project_root, core_path, adapter_path, removed)
+            _caf_scan_md_files(
+                agent_dir,
+                project_root,
+                core_path,
+                adapter_path,
+                removed,
+                warnings,
+            )
 
     # 2. Remove Claude skill dirs for adapter (e.g. .claude/skills/cypilot-adapter/)
     for skill_dir_name in _ADAPTER_SKILL_DIR_NAMES:
@@ -1142,14 +1218,24 @@ def _cleanup_old_adapter_agent_files(
                 try:
                     shutil.rmtree(skill_dir)
                     removed.append(str(skill_dir.relative_to(project_root)))
-                except (PermissionError, OSError):
-                    pass
+                except (PermissionError, OSError) as exc:
+                    if warnings is not None:
+                        warnings.append(
+                            f"Failed to remove stale agent skill dir {skill_dir.relative_to(project_root)}: {exc}"
+                        )
 
     # 3. Scan skill output files for adapter-dir refs
     for rel_dir in _AGENT_SKILL_DIRS:
         agent_dir = project_root / rel_dir
         if agent_dir.is_dir():
-            _caf_scan_md_files(agent_dir, project_root, core_path, adapter_path, removed)
+            _caf_scan_md_files(
+                agent_dir,
+                project_root,
+                core_path,
+                adapter_path,
+                removed,
+                warnings,
+            )
 
     return removed
 
@@ -1337,11 +1423,13 @@ def validate_migration(
 # ===========================================================================
 
 def _init_v3_dirs(
-    cypilot_dir: Path, config_dir: Path, install_dir: str,
-) -> Tuple[Path, Path]:
+    cypilot_dir: Path,
+    config_dir: Path,
+    install_dir: str,
+) -> Tuple[Path, Path, bool]:
     """Create the v3 directory skeleton and copy core from cache.
 
-    Returns ``(gen_dir, core_dir)``.
+    Returns ``(gen_dir, core_dir, created_cypilot_dir)``.
     """
     from .init import _copy_from_cache, _core_readme, _gen_readme, _config_readme, _README_FILENAME
 
@@ -1352,6 +1440,7 @@ def _init_v3_dirs(
 
     if cypilot_dir.exists() and not cypilot_dir.is_dir():
         raise RuntimeError(f"Migration target path exists and is not a directory: {cypilot_dir}")
+    created_cypilot_dir = not cypilot_dir.exists()
     if cypilot_dir.is_dir():
         try:
             if any(cypilot_dir.iterdir()):
@@ -1359,9 +1448,9 @@ def _init_v3_dirs(
                     f"Migration target directory already exists and is non-empty: {cypilot_dir}. "
                     "Refusing to overwrite an existing install dir."
                 )
+            created_cypilot_dir = True
         except OSError as e:
             raise RuntimeError(f"Failed to inspect migration target directory {cypilot_dir}: {e}") from e
-
     cypilot_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
     gen_dir = cypilot_dir / GEN_SUBDIR
@@ -1377,7 +1466,7 @@ def _init_v3_dirs(
     ui.step("V3 directory structure initialized")
     ui.detail("target", f"{install_dir}/")
     ui.detail("layout", ".core/ + .gen/ + config/")
-    return gen_dir, core_dir
+    return gen_dir, core_dir, created_cypilot_dir
 
 
 def _register_v2_kit_dirs(
@@ -1393,10 +1482,11 @@ def _register_v2_kit_dirs(
 def _convert_agents_config(
     project_root: Path,
     adapter_path: str,
+    core_path: str,
     config_dir: Path,
     all_warnings: List[str],
 ) -> None:
-    agents_result = convert_agents_md(project_root, adapter_path, config_dir)
+    agents_result = convert_agents_md(project_root, adapter_path, core_path, config_dir)
     if not agents_result.get("skipped"):
         n_rules = agents_result.get("rules_count", "?")
         ui.step(f"AGENTS.md migrated ({n_rules} rule(s))")
@@ -1502,6 +1592,7 @@ def _convert_v2_data(
     v2: Dict[str, Any],
     project_root: Path,
     adapter_path: str,
+    core_path: str,
     config_dir: Path,
     all_warnings: List[str],
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
@@ -1532,7 +1623,7 @@ def _convert_v2_data(
     # @cpt-end:cpt-cypilot-flow-v2-v3-migration-migrate-project:p1:inst-register-kit-dirs
 
     # @cpt-begin:cpt-cypilot-flow-v2-v3-migration-migrate-project:p1:inst-convert-agents
-    _convert_agents_config(project_root, adapter_path, config_dir, all_warnings)
+    _convert_agents_config(project_root, adapter_path, core_path, config_dir, all_warnings)
     # @cpt-end:cpt-cypilot-flow-v2-v3-migration-migrate-project:p1:inst-convert-agents
 
     config_skill = config_dir / "SKILL.md"
@@ -1579,7 +1670,12 @@ def _cleanup_v2_adapter(
         ui.warn("Skipping old adapter agent file cleanup because the preserved v2 adapter remains a fallback.")
         return
 
-    adapter_removed = _cleanup_old_adapter_agent_files(project_root, adapter_path, core_path)
+    adapter_removed = _cleanup_old_adapter_agent_files(
+        project_root,
+        adapter_path,
+        core_path,
+        all_warnings,
+    )
     if adapter_removed:
         _report_removed_paths(
             f"Old adapter agent files removed ({len(adapter_removed)})",
@@ -1630,6 +1726,7 @@ def _run_migrate_steps(
     cypilot_dir: Path,
     config_dir: Path,
     all_warnings: List[str],
+    migration_state: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Execute the conversion steps of a v2→v3 migration (called from run_migrate).
 
@@ -1648,9 +1745,17 @@ def _run_migrate_steps(
     ui.detail("removed", core_path)
     # @cpt-end:cpt-cypilot-flow-v2-v3-migration-migrate-project:p1:inst-cleanup-core
 
-    gen_dir, _core_dir = _init_v3_dirs(cypilot_dir, config_dir, install_dir)
+    gen_dir, _core_dir, created_cypilot_dir = _init_v3_dirs(cypilot_dir, config_dir, install_dir)
+    migration_state["created_cypilot_dir"] = created_cypilot_dir
 
-    kit_slug_map, v2_kits = _convert_v2_data(v2, project_root, adapter_path, config_dir, all_warnings)
+    kit_slug_map, v2_kits = _convert_v2_data(
+        v2,
+        project_root,
+        adapter_path,
+        core_path,
+        config_dir,
+        all_warnings,
+    )
 
     # @cpt-begin:cpt-cypilot-flow-v2-v3-migration-migrate-project:p1:inst-migrate-kits
     kit_result = migrate_kits(v2_kits, adapter_path, project_root, cypilot_dir)
@@ -1799,18 +1904,23 @@ def run_migrate(
     all_warnings: List[str] = []
     cypilot_dir = project_root / install_dir
     config_dir = cypilot_dir / "config"
+    migration_state: Dict[str, Any] = {"created_cypilot_dir": False}
     # @cpt-end:cpt-cypilot-state-v2-v3-migration-status:p1:inst-transition-converting
 
     try:
         kit_result = _run_migrate_steps(
             project_root, v2, adapter_path, core_path, core_install_type,
-            install_dir, cypilot_dir, config_dir, all_warnings,
+            install_dir, cypilot_dir, config_dir, all_warnings, migration_state,
         )
     except Exception as e:
         # @cpt-begin:cpt-cypilot-flow-v2-v3-migration-migrate-project:p1:inst-rollback-on-fail
         # Rollback on any failure during conversion
         # @cpt-begin:cpt-cypilot-state-v2-v3-migration-status:p1:inst-transition-convert-rollback
-        rollback_result = _rollback(project_root, backup_dir)
+        rollback_result = _rollback(
+            project_root,
+            backup_dir,
+            cypilot_dir if migration_state.get("created_cypilot_dir") else None,
+        )
         if rollback_result.get("success"):
             state = STATE_ROLLED_BACK
             return {
@@ -1864,7 +1974,11 @@ def run_migrate(
                 ui.detail(sev, msg)
         # Rollback on validation failure
         # @cpt-begin:cpt-cypilot-state-v2-v3-migration-status:p1:inst-transition-rolled-back
-        rollback_result = _rollback(project_root, backup_dir)
+        rollback_result = _rollback(
+            project_root,
+            backup_dir,
+            cypilot_dir if migration_state.get("created_cypilot_dir") else None,
+        )
         ui.error("Migration rolled back due to validation failure.")
         if rollback_result.get("success"):
             state = STATE_ROLLED_BACK

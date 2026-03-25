@@ -27,15 +27,10 @@ purpose: Universal workflow for generating execution plans with phased delivery
 <!-- /toc -->
 
 > **⛔ CRITICAL CONSTRAINT**: This workflow ONLY generates execution plans and related handoff artifacts. It NEVER executes the underlying task (generate, analyze, implement) directly. Even if the task seems small, this workflow's job is to produce phase files — not to do the work itself. If the task is small enough for direct execution, tell the user to use `/cypilot-generate` or `/cypilot-analyze` instead. The reference appendices below define the runtime contract that generated plans MUST support; they are not steps performed by this workflow.
-
 > **⛔ CRITICAL CONSTRAINT — COMPLETE COVERAGE, COMPACT LOADING**: Before generating ANY plan, you MUST discover and process ALL navigation rules (`ALWAYS open`, `OPEN and follow`, `ALWAYS open and follow`) from the **target workflow** (generate.md, analyze.md, or the relevant workflow). Every applicable file referenced by those directives MUST be opened at least once, but you MUST retain only the specific sections/ranges needed for decomposition, interaction extraction, and compilation. Completeness is proven by a loaded-file manifest with paths and sections/ranges, not by keeping every dependency fully resident in context. Skipping ANY navigation rule still produces incomplete context and broken plans. This is the #1 source of plan quality failures.
-
 > **⛔ CRITICAL CONSTRAINT — KIT RULES ARE LAW** *(highest priority)*: Every rule in the kit's `rules.md` for the target artifact kind MUST be enforced in the generated plan — **completely, without omission or summarization**. Rules are inlined verbatim into phase files. If the full rules don't fit in a single phase, split the phase so each sub-phase gets ALL rules relevant to its scope — but NEVER trim, summarize, or selectively skip rules to fit a budget. The `checklist.md` items are equally mandatory for analyze tasks. A plan that drops kit rules produces artifacts that fail validation.
-
 > **⛔ CRITICAL CONSTRAINT — DETERMINISTIC FIRST**: Every phase step that CAN be done by a deterministic tool (cpt command, script, shell command) MUST use that tool instead of LLM reasoning. Discover available tools dynamically in Phase 0 — do NOT assume a fixed set of commands. Tool capabilities change between versions. The CLISPEC file is the source of truth for what commands exist and what they can do.
-
 > **⛔ CRITICAL CONSTRAINT — INTERACTIVE QUESTIONS COMPLETENESS** *(mandatory)*: You MUST find ALL interactive questions, user input requests, confirmation gates, review requests, and decision points from: (1) the target workflow, (2) `rules.md` for the target artifact kind, (3) `checklist.md`, (4) `template.md`, AND (5) **every file referenced by navigation rules** (`ALWAYS open`, `OPEN and follow`) in those files — recursively. Every interaction point found MUST appear in the compiled plan: pre-resolvable questions asked BEFORE plan generation, phase-bound questions embedded in phase files. Inspect every applicable dependency, record the source path plus section/range for each interaction point, and carry forward only the extracted interaction data needed by later phases. **Missing even ONE interaction point = plan is INVALID.** See `{cypilot_path}/.core/requirements/plan-checklist.md` Section 2 for the complete extraction procedure.
-
 > **⛔ CRITICAL CONSTRAINT — BRIEF BEFORE COMPILE**: Phase files MUST NOT be written directly. Every phase file MUST be compiled from a corresponding compilation brief (`brief-{NN}-{slug}.md`) that was written to disk in Phase 3.2. The brief is the contract between decomposition (what to include) and compilation (how to assemble). Skipping briefs produces phase files that silently omit kit content, miss load instructions, or inline wrong sections. **If you find yourself writing a phase file without first reading its brief from disk — STOP, you are violating the workflow.** Write the brief first, write it to disk, THEN compile from it. A phase file without a corresponding brief file on disk = INVALID plan.
 
 ALWAYS open and follow `{cypilot_path}/.core/skills/cypilot/SKILL.md` FIRST WHEN {cypilot_mode} is `off`
@@ -99,7 +94,7 @@ Context loaded for plan generation:
   Total retained context: ~{L} lines
   All navigation rules processed? [YES/NO]
 ```
-**Gate**: do NOT proceed until ALL applicable navigation rules are processed, every required referenced file has been opened, and every retained slice needed for planning is captured in the manifest.
+**Gate**: do NOT proceed until ALL applicable navigation rules are processed, every required file referenced by navigation rules has been opened, and every retained slice needed for planning is captured in the manifest.
 
 ### 1.2 Estimate Compiled Size
 
@@ -364,7 +359,7 @@ When the user requests phase execution:
 2. Determine the next executable phase from manifest state, not chat memory: choose the first phase whose status is `pending` or explicitly reopened and whose `depends_on` phases are all `done`.
 3. Audit dependency integrity for that candidate phase: every upstream phase marked `done` must still satisfy its declared `output_files`, its declared `outputs`, and any intermediate artifacts required by downstream `inputs`, except that when `lifecycle = "cleanup"` and `plan.lifecycle_status = "done"`, the intentional Cleanup removals of `brief-*`, `phase-*`, and `out/` are exempt from this audit. If any non-exempt requirement is inconsistent, follow [5.7 Abandoned Plan Recovery](#57-abandoned-plan-recovery).
 4. If the audit reopens any delivery phase, repair lifecycle state before further execution: keep `plan.lifecycle_status = "done"` only for `gitignore`; otherwise reset `plan.lifecycle_status` to `"pending"` and clear any stale `manual_action_required`, `ready`, or `in_progress` state from the prior completion attempt.
-5. If all delivery phases still remain `done` and `plan.lifecycle_status = "manual_action_required"`, resolve the single manual lifecycle choice before attempting any further lifecycle handling. A stale manual lifecycle state MUST NOT block recovery.
+5. When all delivery phases still remain `done` and `plan.lifecycle_status = "manual_action_required"`, resolve the single manual lifecycle choice before attempting any further lifecycle handling. A stale manual lifecycle state MUST NOT block recovery.
 6. Update the candidate phase status to `in_progress` and set `plan.execution_status = "in_progress"`.
 7. Read the phase file and follow it exactly — it is self-contained.
 
@@ -508,7 +503,7 @@ Plan: {task description}
   ...
   Phase N: {title} — {status}
 ```
-If `lifecycle_status = manual_action_required`, report that one manual lifecycle decision is pending and direct the operator back to the execution flow that presents the single keep/archive/delete prompt; do not duplicate the three choices in a status-only response. If `lifecycle_status = failed`, suggest retrying the lifecycle action or handling it manually. If any phase failed, suggest retry / reopen / abort.
+When `lifecycle_status = manual_action_required`, report that one manual lifecycle decision is pending and direct the operator back to the execution flow that presents the single keep/archive/delete prompt; do not duplicate the three choices in a status-only response. If `lifecycle_status = failed`, suggest retrying the lifecycle action or handling it manually. If any phase failed, suggest retry / reopen / abort.
 
 ## Plan Storage Format
 
@@ -532,7 +527,7 @@ Naming conventions:
 - analyze: `{type}-{artifact_kind}-{artifact_slug}` for artifact-oriented reviews, or `{type}-path-{target_path_slug}` when the primary target is a file or directory path. For path targets, if the absolute target path is under `{project_root}`, strip `{project_root}/` first and normalize that relative path (`{project_root}/src/api/users.py` → `analyze-path-src-api-users-py`); otherwise normalize the absolute-path segments.
 - implement: `{type}-feature-{feature_slug}`. Derive `{feature_slug}` from the FEATURE ID first; if no ID exists, use the FEATURE title; if neither exists, use the FEATURE file stem.
 - normalization: lowercase, replace path separators / spaces / punctuation with `-`, collapse repeated `-`, trim leading/trailing `-`.
-- collision handling: if an existing non-archived plan has the same `type` and exactly the same `plan.target_key`, reuse its directory; otherwise append `-2`, `-3`, ... using the lowest available suffix.
+- collision handling: if an existing non-archived plan has the same `type` and the same `plan.target_key`, reuse its directory; otherwise append `-2`, `-3`, ... using the lowest available suffix.
 - phase file: `phase-{NN}-{slug}.md`
 - plan manifest: always `plan.toml`
 

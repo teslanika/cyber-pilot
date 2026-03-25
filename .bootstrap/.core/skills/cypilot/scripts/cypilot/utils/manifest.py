@@ -285,31 +285,48 @@ def resolve_resource_bindings(
 
     @cpt-algo:cpt-cypilot-algo-kit-manifest-resolve:p1
     """
+    result, binding_errors = resolve_resource_bindings_with_errors(
+        config_dir,
+        slug,
+        cypilot_dir,
+    )
+    if binding_errors:
+        raise ValueError("; ".join(binding_errors))
+    return result
+
+
+def resolve_resource_bindings_with_errors(
+    config_dir: Path,
+    slug: str,
+    cypilot_dir: Path,
+) -> Tuple[Dict[str, Path], List[str]]:
+    """Resolve resource bindings while preserving valid entries and collecting errors."""
     core_toml = config_dir / "core.toml"
     if not core_toml.is_file():
-        return {}
+        return {}, []
 
     try:
         with open(core_toml, "rb") as f:
             data = tomllib.load(f)
-    except Exception as exc:
-        import sys
-        sys.stderr.write(f"resolve_resource_bindings: failed to parse {core_toml}: {exc}\n")
-        return {}
+    except tomllib.TOMLDecodeError as exc:
+        return {}, [f"Failed to parse {core_toml}: {exc}"]
+    except OSError as exc:
+        return {}, [f"Failed to read {core_toml}: {exc}"]
 
     kits = data.get("kits")
     if not isinstance(kits, dict):
-        return {}
+        return {}, []
     kit_entry = kits.get(slug)
     if not isinstance(kit_entry, dict):
-        return {}
+        return {}, []
     resources = kit_entry.get("resources")
     if not isinstance(resources, dict):
-        return {}
+        return {}, []
     # @cpt-end:cpt-cypilot-algo-kit-manifest-resolve:p1:inst-resolve-read-bindings
 
     # @cpt-begin:cpt-cypilot-algo-kit-manifest-resolve:p1:inst-resolve-to-absolute
     result: Dict[str, Path] = {}
+    binding_errors: List[str] = []
     for identifier, binding in resources.items():
         if isinstance(binding, dict):
             binding_path = str(binding.get("path", "")).strip()
@@ -319,11 +336,14 @@ def resolve_resource_bindings(
             continue
         if not binding_path:
             continue
-        result[identifier] = _resolve_binding_path(cypilot_dir, identifier, binding_path)
+        try:
+            result[identifier] = _resolve_binding_path(cypilot_dir, identifier, binding_path)
+        except ValueError as exc:
+            binding_errors.append(str(exc))
     # @cpt-end:cpt-cypilot-algo-kit-manifest-resolve:p1:inst-resolve-to-absolute
 
     # @cpt-begin:cpt-cypilot-algo-kit-manifest-resolve:p1:inst-resolve-return
-    return result
+    return result, binding_errors
     # @cpt-end:cpt-cypilot-algo-kit-manifest-resolve:p1:inst-resolve-return
 
 

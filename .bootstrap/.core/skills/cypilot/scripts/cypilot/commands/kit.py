@@ -1579,8 +1579,14 @@ def cmd_kit_update(argv: List[str]) -> int:
         not in ("current", "dry_run", "aborted", "failed")
     )
     command_failed = has_failed_updates
+    if command_failed:
+        status = "FAIL"
+    elif not errors:
+        status = "PASS"
+    else:
+        status = "WARN"
     output: Dict[str, Any] = {
-        "status": "FAIL" if command_failed else ("PASS" if not errors else "WARN"),
+        "status": status,
         "kits_updated": n_updated,
         "results": all_results,
     }

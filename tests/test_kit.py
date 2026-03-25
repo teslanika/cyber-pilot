@@ -17,6 +17,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "cypilot" / "scripts"))
 
+from _test_helpers import bootstrap_test_project as _bootstrap_project
+
 
 def _make_kit_source(td: Path, slug: str = "testkit") -> Path:
     """Create a minimal kit source directory (direct file package)."""
@@ -78,28 +80,6 @@ def _make_manifest_kit_source(td: Path, slug: str = "testkit") -> Path:
     )
     return kit_src
 
-
-def _bootstrap_project(root: Path, adapter_rel: str = "cypilot") -> Path:
-    """Set up a minimal initialized project for kit commands."""
-    root.mkdir(parents=True, exist_ok=True)
-    (root / ".git").mkdir(exist_ok=True)
-    (root / "AGENTS.md").write_text(
-        f'<!-- @cpt:root-agents -->\n```toml\ncypilot_path = "{adapter_rel}"\n```\n<!-- /@cpt:root-agents -->\n',
-        encoding="utf-8",
-    )
-    adapter = root / adapter_rel
-    config = adapter / "config"
-    gen = adapter / ".gen"
-    for d in [adapter, config, gen, adapter / ".core"]:
-        d.mkdir(parents=True, exist_ok=True)
-    (config / "AGENTS.md").write_text("# Test\n", encoding="utf-8")
-    from cypilot.utils import toml_utils
-    toml_utils.dump({
-        "version": "1.0",
-        "project_root": "..",
-        "kits": {},
-    }, config / "core.toml")
-    return adapter
 
 class TestCmdKitDispatcher(unittest.TestCase):
     """Kit CLI dispatcher: handles subcommands and errors."""
@@ -910,6 +890,114 @@ class TestCmdKitInstall(unittest.TestCase):
                 self.assertEqual(out["kit"], "custom-slug")
             finally:
                 os.chdir(cwd)
+
+
+class TestDetectAndMigrateLayoutLegacy(unittest.TestCase):
+    """Cover _detect_and_migrate_layout — legacy layout migration."""
+
+    def test_no_migration_needed(self):
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        with TemporaryDirectory() as td:
+            adapter = Path(td) / "cypilot"
+            (adapter / "config" / "kits" / "sdlc").mkdir(parents=True)
+            result = _detect_and_migrate_layout(adapter)
+            self.assertEqual(result, {})
+
+    def test_dry_run_kits_dir(self):
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        with TemporaryDirectory() as td:
+            adapter = Path(td) / "cypilot"
+            kits_dir = adapter / "kits" / "sdlc"
+            kits_dir.mkdir(parents=True)
+            (kits_dir / "conf.toml").write_text("version = 1\n", encoding="utf-8")
+            result = _detect_and_migrate_layout(adapter, dry_run=True)
+            self.assertIn("sdlc", result)
+            self.assertEqual(result["sdlc"], "would_migrate")
+            # Verify kits/ dir still exists (dry run)
+            self.assertTrue(kits_dir.is_dir())
+
+    def test_migrate_kits_dir(self):
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        with TemporaryDirectory() as td:
+            adapter = Path(td) / "cypilot"
+            kits_dir = adapter / "kits" / "sdlc"
+            kits_dir.mkdir(parents=True)
+            (kits_dir / "conf.toml").write_text("version = 1\n", encoding="utf-8")
+            (kits_dir / "artifacts").mkdir()
+            (kits_dir / "artifacts" / "PRD.md").write_text("# PRD\n", encoding="utf-8")
+            # Legacy artifacts to skip
+            bp_dir = kits_dir / "blueprints"
+            bp_dir.mkdir()
+            (bp_dir / "DESIGN.md").write_text("blueprint\n", encoding="utf-8")
+            result = _detect_and_migrate_layout(adapter)
+            self.assertEqual(result["sdlc"], "migrated")
+            config_kit = adapter / "config" / "kits" / "sdlc"
+            self.assertTrue((config_kit / "conf.toml").is_file())
+            self.assertTrue((config_kit / "artifacts" / "PRD.md").is_file())
+            # Blueprints should NOT be copied
+            self.assertFalse((config_kit / "blueprints").exists())
+            # Old kits/ dir should be removed
+            self.assertFalse((adapter / "kits").is_dir())
+
+    def test_migrate_gen_kits_dir(self):
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        with TemporaryDirectory() as td:
+            adapter = Path(td) / "cypilot"
+            gen_kit = adapter / ".gen" / "kits" / "sdlc"
+            gen_kit.mkdir(parents=True)
+            (gen_kit / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+
+            result = _detect_and_migrate_layout(adapter)
+
+            self.assertIn("sdlc", result)
+            config_kit = adapter / "config" / "kits" / "sdlc"
+            self.assertTrue((config_kit / "SKILL.md").is_file())
+            # .gen/kits/ should be removed
+            self.assertFalse((adapter / ".gen" / "kits").is_dir())
+
+    def test_migrate_updates_core_toml_paths(self):
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        from cypilot.utils import toml_utils
+        with TemporaryDirectory() as td:
+            adapter = Path(td) / "cypilot"
+            kits_dir = adapter / "kits" / "sdlc"
+            kits_dir.mkdir(parents=True)
+            (kits_dir / "conf.toml").write_text("v=1\n", encoding="utf-8")
+            config_dir = adapter / "config"
+            config_dir.mkdir(parents=True)
+            toml_utils.dump({
+                "kits": {"sdlc": {"path": "kits/sdlc", "format": "Cypilot"}},
+            }, config_dir / "core.toml")
+            _detect_and_migrate_layout(adapter)
+            import tomllib
+            with open(config_dir / "core.toml", "rb") as f:
+                data = tomllib.load(f)
+            self.assertEqual(data["kits"]["sdlc"]["path"], "config/kits/sdlc")
+
+    def test_migrate_with_subdir(self):
+        """Migration copies subdirectories from kits/{slug}/."""
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        with TemporaryDirectory() as td:
+            adapter = Path(td) / "cypilot"
+            kits_dir = adapter / "kits" / "sdlc"
+            (kits_dir / "artifacts" / "DESIGN").mkdir(parents=True)
+            (kits_dir / "artifacts" / "DESIGN" / "template.md").write_text("# T\n", encoding="utf-8")
+            (kits_dir / "conf.toml").write_text("version = 1\n", encoding="utf-8")
+            _detect_and_migrate_layout(adapter)
+            config_kit = adapter / "config" / "kits" / "sdlc"
+            self.assertTrue((config_kit / "artifacts" / "DESIGN" / "template.md").is_file())
+
+    def test_dry_run_gen_kits(self):
+        from cypilot.commands.kit import _detect_and_migrate_layout
+        with TemporaryDirectory() as td:
+            adapter = Path(td) / "cypilot"
+            gen_kit = adapter / ".gen" / "kits" / "sdlc"
+            gen_kit.mkdir(parents=True)
+            (gen_kit / "SKILL.md").write_text("# S\n", encoding="utf-8")
+            result = _detect_and_migrate_layout(adapter, dry_run=True)
+            self.assertEqual(result["sdlc"], "would_migrate")
+            # .gen/kits/ should still exist (dry run)
+            self.assertTrue(gen_kit.is_dir())
 
 
 class TestDetectAndMigrateLayout(unittest.TestCase):

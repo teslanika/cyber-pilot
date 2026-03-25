@@ -18,35 +18,19 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "cypilot" / "scripts"))
 
+from _test_helpers import bootstrap_test_project, write_registered_sdlc_config
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _bootstrap_project(root: Path, adapter_rel: str = "cypilot") -> Path:
-    """Set up a minimal initialized project for kit commands."""
-    root.mkdir(parents=True, exist_ok=True)
-    (root / ".git").mkdir(exist_ok=True)
-    (root / "AGENTS.md").write_text(
-        f'<!-- @cpt:root-agents -->\n```toml\ncypilot_path = "{adapter_rel}"\n```\n<!-- /@cpt:root-agents -->\n',
-        encoding="utf-8",
+    return bootstrap_test_project(
+        root,
+        adapter_rel,
+        systems=[{"name": "TestProject", "slug": "test"}],
     )
-    adapter = root / adapter_rel
-    config = adapter / "config"
-    gen = adapter / ".gen"
-    for d in [adapter, config, gen, adapter / ".core"]:
-        d.mkdir(parents=True, exist_ok=True)
-    (config / "AGENTS.md").write_text("# Test\n", encoding="utf-8")
-    from cypilot.utils import toml_utils
-    toml_utils.dump({
-        "version": "1.0",
-        "project_root": "..",
-        "kits": {},
-    }, config / "core.toml")
-    toml_utils.dump({
-        "systems": [{"name": "TestProject", "slug": "test"}],
-    }, config / "artifacts.toml")
-    return adapter
 
 
 def _write_core_toml(config_dir: Path, data: dict) -> Path:
@@ -185,8 +169,8 @@ class TestContextConstraintsResourceBinding(unittest.TestCase):
             self.assertIn("sdlc", ctx.kits)
             self.assertIsNotNone(ctx.kits["sdlc"].constraints)
 
-    def test_binding_path_missing_file_falls_back(self):
-        """When constraints binding path does not exist on disk, fall back to kit root."""
+    def test_binding_path_missing_file_surfaces_error(self):
+        """When constraints binding path does not exist on disk, surface an error."""
         from cypilot.utils.context import CypilotContext
 
         with TemporaryDirectory() as td:
@@ -228,8 +212,10 @@ class TestContextConstraintsResourceBinding(unittest.TestCase):
             ctx = CypilotContext.load(root)
             self.assertIsNotNone(ctx)
             self.assertIn("sdlc", ctx.kits)
-            # Should still load (from kit root fallback), no crash
-            self.assertIsNotNone(ctx.kits["sdlc"].constraints)
+            self.assertIsNone(ctx.kits["sdlc"].constraints)
+            msgs = [str(e.get("message", "")) for e in (ctx._errors or [])]
+            self.assertTrue(any("Invalid constraints.toml" in msg for msg in msgs))
+            self.assertTrue(any("Bound constraints path does not exist or is not a file" in str(e.get("errors", [])) for e in (ctx._errors or [])))
 
 
 # ---------------------------------------------------------------------------
@@ -253,31 +239,13 @@ class TestValidateKitsResourcePaths(unittest.TestCase):
             kit_dir = config / "kits" / "sdlc"
             _write_minimal_constraints(kit_dir)
 
-            from cypilot.utils import toml_utils
-            toml_utils.dump({
-                "version": "1.0",
-                "project_root": "..",
-                "kits": {
-                    "sdlc": {
-                        "format": "Cypilot",
-                        "path": "config/kits/sdlc",
-                        "version": "2.0",
-                        "resources": {
-                            "adr_artifacts": {"path": "config/kits/sdlc/artifacts/ADR"},
-                            "constraints": {"path": "config/kits/sdlc/constraints.toml"},
-                        },
-                    },
+            write_registered_sdlc_config(
+                config,
+                resources={
+                    "adr_artifacts": {"path": "config/kits/sdlc/artifacts/ADR"},
+                    "constraints": {"path": "config/kits/sdlc/constraints.toml"},
                 },
-            }, config / "core.toml")
-
-            toml_utils.dump({
-                "version": "1.0",
-                "project_root": "..",
-                "kits": {
-                    "sdlc": {"format": "Cypilot", "path": "config/kits/sdlc"},
-                },
-                "systems": [{"name": "Test", "slug": "test", "kit": "sdlc"}],
-            }, config / "artifacts.toml")
+            )
 
             # constraints.toml exists but ADR dir does NOT
             # (constraints path exists because _write_minimal_constraints created it)
@@ -507,31 +475,13 @@ class TestValidateKitsResourcePaths(unittest.TestCase):
             adr_dir = kit_dir / "artifacts" / "ADR"
             adr_dir.mkdir(parents=True)
 
-            from cypilot.utils import toml_utils
-            toml_utils.dump({
-                "version": "1.0",
-                "project_root": "..",
-                "kits": {
-                    "sdlc": {
-                        "format": "Cypilot",
-                        "path": "config/kits/sdlc",
-                        "version": "2.0",
-                        "resources": {
-                            "adr_artifacts": {"path": "config/kits/sdlc/artifacts/ADR"},
-                            "constraints": {"path": "config/kits/sdlc/constraints.toml"},
-                        },
-                    },
+            write_registered_sdlc_config(
+                config,
+                resources={
+                    "adr_artifacts": {"path": "config/kits/sdlc/artifacts/ADR"},
+                    "constraints": {"path": "config/kits/sdlc/constraints.toml"},
                 },
-            }, config / "core.toml")
-
-            toml_utils.dump({
-                "version": "1.0",
-                "project_root": "..",
-                "kits": {
-                    "sdlc": {"format": "Cypilot", "path": "config/kits/sdlc"},
-                },
-                "systems": [{"name": "Test", "slug": "test", "kit": "sdlc"}],
-            }, config / "artifacts.toml")
+            )
 
             ctx = CypilotContext.load(root)
             self.assertIsNotNone(ctx)

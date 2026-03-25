@@ -129,6 +129,7 @@ purpose: Generic (kit-agnostic) quality checklist for code changes and reviews
 - [ ] Complex logic hotspots are isolated behind clear abstractions with focused tests.
 - [ ] Control flow remains understandable without tracing excessive hidden state or side effects.
 - [ ] Necessary complexity is justified by requirements rather than convenience or incidental design.
+Optional: Quantitative guidance — advisory calibration only, not hard limits. Reviewers may use rough thresholds such as cyclomatic complexity `<= 10` for simple functions, `11–20` for moderate functions, and `> 20` as a refactor flag; max nesting depth around `3–4` levels; function length around `~200` LOC as a soft upper bound; and similar cognitive-complexity breakpoints for triage.
 ## Error Handling (ERR)
 ### ERR-CODE-001: Explicit Error Handling [CRITICAL]
 - [ ] Errors fail explicitly.

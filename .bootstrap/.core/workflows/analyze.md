@@ -83,9 +83,9 @@ Before output, self-check: PASS without semantic review? fresh Read this turn? N
 ## Overview
 Modes: Full (default) = deterministic gate → semantic review; Semantic-only = skip deterministic gate; Artifact = template + checklist; Code = code-checklist + bug-finding + design requirements; Prompt review = prompt-engineering + prompt-bug-finding review for instruction documents.
 Commands: `/cypilot-analyze`, `/cypilot-analyze semantic`, `/cypilot-analyze --artifact <path>`, `/cypilot-analyze semantic --artifact <path>`.
-Prompt review triggers include "analyze this system prompt", "review agent instructions", "check this workflow/skill", and "prompt engineering review". Select prompt review from the request intent and target context; do **not** assume a dedicated prompt-specific public route unless the current host explicitly exposes one. After `execution-protocol.md`, you have `TARGET_TYPE`, `RULES`, `KIND`, `PATH`, and resolved dependencies.
+Prompt review trigger matching is intent-based, not exact-string based. Match intent (for example `prompt engineering review`, `review this prompt for bugs`, `check prompt quality`, or `analyze agent instructions`), and treat equivalent phrasing as triggering prompt review plus the companion `prompt-bug-finding.md` methodology when defect-oriented review is requested. Select prompt review from the request intent and target context; do **not** assume a dedicated prompt-specific public route unless the current host explicitly exposes one. After `execution-protocol.md`, you have `TARGET_TYPE`, `RULES`, `KIND`, `PATH`, and resolved dependencies.
 If analysis finds actionable issues, the workflow MUST end by generating two chat-only remediation prompts: a bounded `Fix Prompt` that invokes skill `cypilot` and routes to `/cypilot-generate`, and a broader `Plan Prompt` that invokes skill `cypilot` and routes to `/cypilot-plan`. Both prompts MUST be self-contained final prompts usable in a fresh chat — all findings, paths, and context embedded inline.
-For code-review style requests such as `review my changes`, `review this diff`, `inspect this patch`, or similar review/audit requests, every reported defect, regression risk, or fix recommendation that requires artifact, code, or workflow/instruction changes counts as an actionable issue and therefore MUST trigger both remediation prompts in the same response.
+For code-review-style requests such as `review my changes`, `review this diff`, `inspect this patch`, or similar review/audit requests, every reported defect, regression risk, or fix recommendation that requires artifact, code, or workflow/instruction changes counts as an actionable issue and therefore MUST trigger both remediation prompts in the same response.
 
 ## Context Budget & Overflow Prevention (CRITICAL)
 - Budget first: estimate size before loading large docs (for example with `wc -l`) and state the budget for this turn.
@@ -244,13 +244,9 @@ Checkpoint rule for artifacts `>500` lines or multi-turn analysis: after each ch
 
 Print to chat only; create no files.
 
-If the result contains any actionable issue (`FAIL`, `PARTIAL`, blocking validator errors, or any recommendation that requires artifact, code, or workflow/instruction changes), the agent MUST append both a final `Fix Prompt` section and a final `Plan Prompt` section after the analysis output.
-This requirement applies equally to artifact analysis, code analysis, PR-style review, and plain-language review requests such as `review my changes`.
-If the response reports even one fixable finding, omission of either remediation prompt, or ending the response before both prompt blocks are emitted, makes the analysis output incomplete.
+If the result contains any actionable issue (`FAIL`, `PARTIAL`, blocking validator errors, or any recommendation that requires artifact, code, or workflow/instruction changes), the agent MUST append both a final `Fix Prompt` section and a final `Plan Prompt` section after the analysis output. This requirement applies equally to artifact analysis, code analysis, PR-style review, and plain-language review requests such as `review my changes`.
 
-An analysis summary alone is not completion. The validation report alone is not completion. The next-step menu alone is not completion. When actionable issues exist, the response is invalid unless it ends with `Fix Prompt` followed by `Plan Prompt`.
-
-Before ending a response with actionable issues, perform this final self-check: were actionable issues reported; if yes, was `Fix Prompt` emitted; if yes, was `Plan Prompt` emitted after it; only then may the response end.
+Apply `enforceRemediationPrompts` at response finalization: detect actionable findings; require both `Fix Prompt` and `Plan Prompt`; require `Fix Prompt` to appear before `Plan Prompt`; and fail finalization with a clear validation error if either prompt is missing, out of order, or the response ends before both prompt blocks are emitted. An analysis summary alone is not completion. The validation report alone is not completion. The next-step menu alone is not completion.
 
 Both remediation prompts MUST be **self-contained final prompts** usable in a fresh chat without any prior context:
 - explicitly contain the sentence `Invoke skill cypilot`
@@ -296,7 +292,7 @@ Prompt-specific routing:
 - Categories Summary: Total {N}; PASS {N}; FAIL {N}; PARTIAL {N}; N/A {N}; Unsupported-N/A violations {N}
 
 ### 4. Agent Self-Test
-- Reuse the canonical self-test questions from `## Agent Self-Test (STRICT mode — AFTER completing work)` below; if RELAXED mode uses a justified subset, state that explicitly.
+- See `## Agent Self-Test (STRICT mode — AFTER completing work)` below and copy its canonical questions into this table; if RELAXED mode uses a justified subset, state that explicitly.
 | Question | Answer | Evidence |
 |----------|--------|----------|
 | {question} | YES/NO | {evidence} |
@@ -394,7 +390,7 @@ Issues require remediation. Use one of the generated prompts above as the defaul
 2. Start phased remediation with skill `cypilot` via the generated `Plan Prompt`
 3. Re-run analysis after fixes
 ```
-If actionable issues exist, the next-step menu is informational only; the workflow MUST still end in the same response with `Fix Prompt` followed by `Plan Prompt` as the final two sections. MUST NOT ask whether the prompts should be generated and MUST NOT defer them to a later user turn.
+If actionable issues exist, the next-step menu is informational only; `enforceRemediationPrompts` still applies, so the workflow MUST end in the same response with `Fix Prompt` followed by `Plan Prompt` as the final two sections. MUST NOT ask whether the prompts should be generated and MUST NOT defer them to a later user turn.
 
 ## State Summary
 
