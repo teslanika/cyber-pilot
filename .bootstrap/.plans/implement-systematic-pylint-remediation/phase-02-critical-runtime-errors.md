@@ -112,7 +112,11 @@ This phase must begin from the baseline contract, not from ad hoc local changes.
 - `E0602`
 - `E1135`
 - `E0102`
-- Any strictly necessary parser/import unblocker that prevents those diagnostics from being evaluated correctly
+- Minimal unblockers required only to let `E0602`, `E1135`, and `E0102` be evaluated correctly:
+  - add the smallest missing import or stub needed for module parsing/binding
+  - apply the narrowest parser or syntax fix needed to restore valid parsing
+  - make a tiny import guard or import-placement fix only when it directly unblocks those diagnostics
+- Any unblocker MUST be the smallest change that enables evaluation, MUST NOT suppress or mask other messages, MUST include a one-line justification in the PR/report, and any unblocker outside the examples above requires reviewer sign-off
 
 ### Runtime inputs to inspect
 - `out/phase-01-rollout-baseline.md`
@@ -162,11 +166,11 @@ Next phase prompt (copy-paste into new chat if needed):
 
 ```text
 I have a Cypilot execution plan at:
-  /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
+  .bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
 
 Phase 2 is complete ({status}).
 Please read the plan manifest, then execute Phase 3: "High-risk warnings".
-The phase file is: /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/phase-03-high-risk-warnings.md
+The phase file is: .bootstrap/.plans/implement-systematic-pylint-remediation/phase-03-high-risk-warnings.md
 It is self-contained — follow its instructions exactly.
 After completion, report results and generate the prompt for the next phase.
 ```

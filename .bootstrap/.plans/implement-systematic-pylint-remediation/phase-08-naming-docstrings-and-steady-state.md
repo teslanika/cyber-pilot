@@ -152,7 +152,7 @@ If this is the **last phase**, instead of a next-phase prompt output:
 
 ```text
 ALL PHASES COMPLETE (8/8)
-Plan: /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
+Plan: .bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
 Lifecycle: archive
 ```
 

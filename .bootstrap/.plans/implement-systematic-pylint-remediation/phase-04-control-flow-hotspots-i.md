@@ -9,7 +9,7 @@ depends_on = [3]
 input_files = ["pyproject.toml", "src/cypilot_proxy", "skills/cypilot/scripts/cypilot", "tests"]
 output_files = ["pyproject.toml", "src/cypilot_proxy", "skills/cypilot/scripts/cypilot", "tests"]
 outputs = ["out/phase-04-control-flow-hotspots-i.md"]
-inputs = ["out/phase-01-message-priority.md", "out/phase-03-high-risk-warnings.md"]
+inputs = ["out/phase-01-message-priority.md", "out/phase-03-next-prompt.txt"]
 ```
 
 ## Preamble
@@ -51,7 +51,7 @@ This phase now opens the first limited refactor family under the same staged bas
 ## Rules
 
 ### Phase Scope Rules
-- MUST read `out/phase-01-message-priority.md` and `out/phase-03-high-risk-warnings.md` before editing.
+- MUST read `out/phase-01-message-priority.md` and `out/phase-03-next-prompt.txt` before editing.
 - MUST enable only the first hotspot metrics assigned to this phase.
 - MUST preserve behavior while reducing control-flow complexity.
 - MUST prefer extraction, decomposition, and clearer intermediate helpers over suppression.
@@ -113,10 +113,11 @@ This phase now opens the first limited refactor family under the same staged bas
 
 ### Runtime inputs to inspect
 - `out/phase-01-message-priority.md`
+- `out/phase-03-next-prompt.txt`
 
 ## Task
 
-1. Read `out/phase-01-message-priority.md`. Read `out/phase-03-high-risk-warnings.md`. Read `pyproject.toml`. Recover the assigned hotspot IDs and current baseline.
+1. Read `out/phase-01-message-priority.md`. Read `out/phase-03-next-prompt.txt`. Read `pyproject.toml`. Recover the assigned hotspot IDs and current baseline.
 2. Enable only `R0914`, `R0912`, and `R0915` in `pyproject.toml`.
 3. Read `src/cypilot_proxy`. Read `skills/cypilot/scripts/cypilot`. Inspect the failing files there, then refactor only the hotspots reported for this phase using behavior-preserving extractions, helper functions, or localized decompositions.
 4. Read `tests`. Add or update tests anywhere refactoring changes control flow or risks regression.
@@ -159,11 +160,11 @@ Next phase prompt (copy-paste into new chat if needed):
 
 ```text
 I have a Cypilot execution plan at:
-  /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
+  .bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
 
 Phase 4 is complete ({status}).
 Please read the plan manifest, then execute Phase 5: "Control-flow hotspots II".
-The phase file is: /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/phase-05-control-flow-hotspots-ii.md
+The phase file is: .bootstrap/.plans/implement-systematic-pylint-remediation/phase-05-control-flow-hotspots-ii.md
 It is self-contained — follow its instructions exactly.
 After completion, report results and generate the prompt for the next phase.
 ```

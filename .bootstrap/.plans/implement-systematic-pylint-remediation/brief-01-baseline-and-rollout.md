@@ -20,10 +20,10 @@ inputs = []
 ```
 
 ## Load Instructions
-1. **Phase template**: Read `/Volumes/CaseSensitive/coding/cypilot/.bootstrap/.core/requirements/plan-template.md` (lines 58-79 and 152-199, ~70 lines)
+1. **Phase template**: Read `.bootstrap/.core/requirements/plan-template.md` (lines 58-79 and 152-199, ~70 lines)
    - Action: inline
    - Scope: use the exact preamble and output format contract; do not invent extra sections
-2. **Codebase rules**: Read `/Volumes/CaseSensitive/coding/cypilot/.bootstrap/config/kits/sdlc/codebase/rules.md` (lines 61-158 and 286-305, ~118 lines)
+2. **Codebase rules**: Read `.bootstrap/config/kits/sdlc/codebase/rules.md` (lines 61-158 and 286-305, ~118 lines)
    - Action: inline
    - Scope: keep implementation-quality and build-lint obligations; skip prerequisites, tasks, next steps
 3. **Pylint config**: Read `pyproject.toml` (lines 22-62, ~41 lines)
@@ -39,7 +39,7 @@ inputs = []
 **Do NOT load**: the entire source tree, the generic code checklist, or later phase `out/` reports.
 
 ## Compile Phase File
-Write to: `/Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/phase-01-baseline-and-rollout.md`
+Write to: `.bootstrap/.plans/implement-systematic-pylint-remediation/phase-01-baseline-and-rollout.md`
 
 Required sections:
 1. TOML frontmatter

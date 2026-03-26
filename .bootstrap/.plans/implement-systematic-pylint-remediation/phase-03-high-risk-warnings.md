@@ -165,11 +165,11 @@ Next phase prompt (copy-paste into new chat if needed):
 
 ```text
 I have a Cypilot execution plan at:
-  /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
+  .bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
 
 Phase 3 is complete ({status}).
 Please read the plan manifest, then execute Phase 4: "Control-flow hotspots I".
-The phase file is: /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/phase-04-control-flow-hotspots-i.md
+The phase file is: .bootstrap/.plans/implement-systematic-pylint-remediation/phase-04-control-flow-hotspots-i.md
 It is self-contained — follow its instructions exactly.
 After completion, report results and generate the prompt for the next phase.
 ```

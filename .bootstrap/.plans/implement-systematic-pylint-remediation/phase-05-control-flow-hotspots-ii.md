@@ -162,11 +162,11 @@ Next phase prompt (copy-paste into new chat if needed):
 
 ```text
 I have a Cypilot execution plan at:
-  /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
+  .bootstrap/.plans/implement-systematic-pylint-remediation/plan.toml
 
 Phase 5 is complete ({status}).
 Please read the plan manifest, then execute Phase 6: "Architecture and duplication hygiene".
-The phase file is: /Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/phase-06-architecture-and-duplication-hygiene.md
+The phase file is: .bootstrap/.plans/implement-systematic-pylint-remediation/phase-06-architecture-and-duplication-hygiene.md
 It is self-contained — follow its instructions exactly.
 After completion, report results and generate the prompt for the next phase.
 ```

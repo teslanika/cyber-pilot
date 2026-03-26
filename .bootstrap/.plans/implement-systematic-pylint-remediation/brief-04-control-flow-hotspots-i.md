@@ -20,13 +20,13 @@ inputs = ["out/phase-01-message-priority.md", "out/phase-03-high-risk-warnings.m
 ```
 
 ## Load Instructions
-1. **Phase template**: Read `/Volumes/CaseSensitive/coding/cypilot/.bootstrap/.core/requirements/plan-template.md` (lines 58-79 and 152-199, ~70 lines)
+1. **Phase template**: Read `.bootstrap/.core/requirements/plan-template.md` (lines 58-79 and 152-199, ~70 lines)
    - Action: inline
    - Scope: use the exact preamble and output format contract
-2. **Codebase rules**: Read `/Volumes/CaseSensitive/coding/cypilot/.bootstrap/config/kits/sdlc/codebase/rules.md` (lines 131-158 and 286-324, ~67 lines)
+2. **Codebase rules**: Read `.bootstrap/config/kits/sdlc/codebase/rules.md` (lines 131-158 and 286-324, ~67 lines)
    - Action: inline
    - Scope: keep engineering, quality, tests, and build/lint obligations for structural refactors
-3. **Generic code checklist**: Read `/Volumes/CaseSensitive/coding/cypilot/.bootstrap/.core/requirements/code-checklist.md` (lines 46-132, 198-216, and 267-290, ~130 lines)
+3. **Generic code checklist**: Read `.bootstrap/.core/requirements/code-checklist.md` (lines 46-132, 198-216, and 267-290, ~130 lines)
    - Action: inline
    - Scope: keep TDD, SRP, DRY, KISS, YAGNI, complexity control, and reporting obligations
 4. **Prior outputs**: Read `out/phase-01-message-priority.md` and `out/phase-03-high-risk-warnings.md`
@@ -39,7 +39,7 @@ inputs = ["out/phase-01-message-priority.md", "out/phase-03-high-risk-warnings.m
 **Do NOT load**: duplication-specific backlog, import formatting backlog, or docstring/naming cleanup.
 
 ## Compile Phase File
-Write to: `/Volumes/CaseSensitive/coding/cypilot/.bootstrap/.plans/implement-systematic-pylint-remediation/phase-04-control-flow-hotspots-i.md`
+Write to: `.bootstrap/.plans/implement-systematic-pylint-remediation/phase-04-control-flow-hotspots-i.md`
 
 Required sections:
 1. TOML frontmatter
