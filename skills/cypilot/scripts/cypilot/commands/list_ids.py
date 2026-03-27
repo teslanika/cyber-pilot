@@ -187,7 +187,7 @@ def cmd_list_ids(argv: List[str]) -> int:
                 # Apply registry root ignore rules as a hard visibility filter.
                 try:
                     rel = file_path.resolve().relative_to(ctx.project_root).as_posix()
-                except ValueError:
+                except (OSError, ValueError):
                     rel = None
                 if rel and ctx.meta.is_ignored(rel):
                     continue

@@ -69,7 +69,7 @@ def find_project_root(start: Path) -> Optional[Path]:
         if agents.is_file():
             try:
                 head = agents.read_text(encoding="utf-8")[:512]
-            except OSError:
+            except (OSError, UnicodeDecodeError):
                 head = ""
             if _MARKER_START in head:
                 return current
@@ -98,7 +98,7 @@ def _read_cypilot_var(project_root: Path) -> Optional[str]:
         return None
     try:
         content = agents_file.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     if _MARKER_START not in content:
         return None
@@ -225,7 +225,7 @@ def find_cypilot_directory(start: Path, cypilot_root: Optional[Path] = None) -> 
                     # Or check for rule/spec references in content
                     if "rule" in content_lower or "spec" in content_lower:
                         return True
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             pass  # Expected: search continues if file read fails
 
         # Fallback: verify it has rules/ or specs/ directory (strong structural indicator)
@@ -284,7 +284,7 @@ def load_cypilot_config(adapter_dir: Path) -> Dict[str, object]:
                 if line.startswith("# Cypilot Adapter:"):
                     config["project_name"] = line.replace("# Cypilot Adapter:", "").strip()
                     break
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             pass  # Expected: project_name is optional metadata
 
     # List available rules (config/ layout, fallback to flat)
@@ -390,6 +390,6 @@ def load_text(path: Path) -> Tuple[str, Optional[str]]:
         return "", f"Not a file: {path}"
     try:
         return path.read_text(encoding="utf-8"), None
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         return "", f"Failed to read {path}: {e}"
 # @cpt-end:cpt-cypilot-algo-core-infra-config-management:p1:inst-cfg-helpers

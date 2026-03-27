@@ -1014,7 +1014,7 @@ def _caf_target_refs_adapter_dir(
     try:
         raw_target = Path(target)
         resolved_target = (fpath.parent / raw_target).resolve() if not raw_target.is_absolute() else raw_target.resolve()
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         return False
     return resolved_target == adapter_root or adapter_root in resolved_target.parents
 
@@ -1082,7 +1082,7 @@ def _caf_is_adapter_workflow_proxy(path: Path, project_root: Path, core_path: st
         return False
     try:
         target_path = (path.parent / match.group(1).strip()).resolve()
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         return False
     expected_targets = {
         str((project_root / core_path / "workflows" / "adapter.md").resolve()),

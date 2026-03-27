@@ -1059,6 +1059,9 @@ def load_artifacts_meta(adapter_dir: Path) -> Tuple[Optional[ArtifactsMeta], Opt
         else:
             data = json.loads(path.read_text(encoding="utf-8"))
 
+        if not isinstance(data, dict):
+            return None, f"Failed to load artifacts registry {path}: expected mapping at root, got {type(data).__name__}"
+
         # Merge fields from core.toml into registry data (new layout)
         core_path = config_dir / "core.toml"
         if not core_path.is_file():

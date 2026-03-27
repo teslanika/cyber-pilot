@@ -137,7 +137,7 @@ All `# pylint: disable` comments include an explanation:
 
 ## Verification
 
-```
+```text
 make pylint  → exit 0, zero warnings
 make test    → 2106 passed, 0 failed, 2 skipped
 ```

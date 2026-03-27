@@ -297,7 +297,7 @@ def _validate_kit_by_path(kit_path: Path, *, verbose: bool = False) -> Tuple[int
             line=1,
             kit=slug,
         ))
-    except (OSError, ValueError, KeyError):
+    except (OSError, KeyError):
         pass
     # @cpt-end:cpt-cypilot-algo-kit-validate-by-path:p1:inst-verify-resource-paths
 

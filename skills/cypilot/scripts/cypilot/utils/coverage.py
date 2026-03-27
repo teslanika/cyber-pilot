@@ -132,7 +132,7 @@ def scan_file_coverage(path: Path) -> Optional[FileCoverage]:
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
 
     lines = text.splitlines()
