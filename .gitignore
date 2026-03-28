@@ -52,7 +52,6 @@ cypilot-flow-layers-2a.drawio.svg
 .github/prompts/*
 .github/copilot-instructions.md
 /tmp
-Cypilot.code-workspace
 Spaider.code-workspace
 
 # Cypilot plans (ephemeral)
@@ -62,3 +61,4 @@ Spaider.code-workspace
 # Artifacts
 .prs/*
 coverage.xml
+.workspace-sources/*
