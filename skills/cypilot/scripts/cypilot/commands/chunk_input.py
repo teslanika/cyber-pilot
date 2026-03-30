@@ -269,18 +269,21 @@ def _write_chunks(
                 })
                 chunk_index += 1
         input_signature = _write_package_manifest(sources, chunks, staging_dir, max_lines)
+        preserve_ok = True
         if output_dir.exists():
             backup_dir = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.backup-", dir=output_dir.parent))
             backup_dir.rmdir()
             output_dir.replace(backup_dir)
+            try:
+                _preserve_non_generated(backup_dir, staging_dir)
+            except OSError:
+                preserve_ok = False
         staging_dir.replace(output_dir)
         _finalize_written_paths(sources, chunks, output_dir)
         if backup_dir is not None and backup_dir.exists():
-            try:
-                _preserve_non_generated(backup_dir, output_dir)
-            except OSError:
-                pass  # best-effort: swap succeeded, don't fail on preservation
-            shutil.rmtree(backup_dir, ignore_errors=True)
+            if preserve_ok:
+                shutil.rmtree(backup_dir, ignore_errors=True)
+            # else: preservation failed — keep backup so user files are not lost
         swap_succeeded = True
         return chunks, input_signature, (output_dir / PACKAGE_MANIFEST_FILE).as_posix()
     except BaseException:
@@ -294,8 +297,11 @@ def _write_chunks(
             if output_dir.exists():
                 # Restore succeeded or staging already replaced output_dir;
                 # preserve non-generated user data then remove the backup.
-                _preserve_non_generated(backup_dir, output_dir)
-                shutil.rmtree(backup_dir, ignore_errors=True)
+                try:
+                    _preserve_non_generated(backup_dir, output_dir)
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+                except OSError:
+                    pass  # preservation failed — keep backup intact to avoid losing user files
             # else: restore failed — keep backup intact as the only copy
 # @cpt-end:cpt-cypilot-algo-execution-plans-chunk-write:p1:inst-write-chunk-file
 

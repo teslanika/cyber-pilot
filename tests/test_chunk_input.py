@@ -575,7 +575,7 @@ class TestChunkInputCommand(unittest.TestCase):
 
 
     def test_preservation_failure_does_not_fail_command(self):
-        """If _preserve_non_generated raises after swap, command still succeeds."""
+        """If _preserve_non_generated raises, command still succeeds but keeps backup."""
         with TemporaryDirectory() as td:
             src = Path(td) / "request.md"
             out_dir = Path(td) / "input"
@@ -602,9 +602,10 @@ class TestChunkInputCommand(unittest.TestCase):
             # New chunks written successfully
             self.assertTrue((out_dir / "manifest.json").is_file())
 
-            # No leftover backup directories
+            # Backup kept so user files are not silently lost
             backup_candidates = list(Path(td).glob(".input.backup-*"))
-            self.assertEqual(backup_candidates, [], "backup should be cleaned up even after preservation failure")
+            self.assertEqual(len(backup_candidates), 1, "backup should be kept when preservation fails")
+            self.assertTrue((backup_candidates[0] / "user-notes.txt").is_file(), "user file should survive in backup")
 
 
     def test_dry_run_returns_signature_without_writing_files(self):
